@@ -1,0 +1,63 @@
+name: DSH-Plus Windows installer
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: dsh-plus-windows-installer
+  cancel-in-progress: false
+jobs:
+  package:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    env:
+      CI: 'true'
+      DSH_TELEMETRY_DISABLED: '1'
+      NODE_OPTIONS: --max-old-space-size=6144
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Prepare package manager
+        run: |
+          npm install --global corepack@0.34.0
+          corepack enable
+          git config --global core.longpaths true
+      - name: Install official locked dependencies
+        run: npm run setup
+      - name: Build Plus plugin
+        run: |
+          npm ci --prefix plugins/link
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm ci --prefix plugins/commander
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run build:plus
+          exit $LASTEXITCODE
+      - name: Build full Windows installer and verify runtime
+        run: npm run package:plus:win
+      - name: Verify silent installation and preinstalled Plus
+        run: ./scripts/desktop/test-install-windows.ps1
+      - name: Retain installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-plus-windows-x64
+          path: artifacts/windows/*.exe
+          if-no-files-found: error
+          retention-days: 14
+      - name: Retain diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-plus-windows-diagnostics
+          include-hidden-files: true
+          path: |
+            deepseek-harness/apps/desktop/.desktop-build/packaging-runs/
+            artifacts/windows/builder-debug.yml
+          if-no-files-found: warn

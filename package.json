@@ -29,6 +29,7 @@
     "build:voice": "npm --prefix plugins/commander run build:client",
     "test:link": "npm --prefix plugins/link test",
     "build:plus": "npm --prefix plugins/commander run build:client",
-    "build:android": "node scripts/build-link-android.mjs"
+    "build:android": "node scripts/build-link-android.mjs",
+    "package:plus:win": "node scripts/desktop/package-windows.mjs"
   }
 }
