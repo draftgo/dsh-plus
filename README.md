@@ -35,7 +35,7 @@ plugins/
     test/             单元测试与可选真实联调
 Design/               设计、开发清单及实际实现记录
 scripts/              官方命令与 Android 构建封装
-artifacts/            本地产物分类；二进制忽略 Git，下载走 Releases
+artifacts/            本地产物按 plugins / android / windows 分类；二进制忽略 Git，下载走 Releases
 deepseek-harness/     官方 Git 子模块，版本由 upstream.json 锁定
 reference/            可选只读参考，不随仓库交付或参与构建
 ```
@@ -54,6 +54,8 @@ npm run test:commander
 npm run test:link
 npm run check
 ```
+
+完整 Windows EXE 构建使用 `npm run package:plus:win`，要求原生 Windows x64。源码与 Actions 流程见 [桌面打包](scripts/desktop/README.md)。
 
 `npm run check` 仅验证版本与入口一致性；`npm run build/dev/start` 转发官方 Desktop 命令，平台与签名要求以官方文档为准。
 

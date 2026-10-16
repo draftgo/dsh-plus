@@ -5,6 +5,7 @@
 ```text
 plugins/    DSH-Plus 插件 .tgz
 android/    Android 验收用 debug .apk
+windows/    完整 Windows 安装程序 .exe
 ```
 
 插件：先执行 `npm run build:plus`，再执行 `npm pack ./plugins/commander --pack-destination artifacts/plugins`（需先创建目录）。

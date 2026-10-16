@@ -67,7 +67,11 @@ export function stagePluginBundle({ runtime, plugin = resolve(import.meta.dirnam
       if (ancestors.has(dependency)) continue;
       const output = join(target, 'node_modules', name);
       mkdirSync(dirname(output), { recursive: true });
-      cpSync(dependency, output, { recursive: true, dereference: true, filter: path => path === dependency || !path.slice(dependency.length + 1).split(/[\\/]/u).includes('node_modules') });
+      cpSync(dependency, output, { recursive: true, dereference: true, filter: path => {
+        if (path === dependency) return true;
+        const relative = path.slice(dependency.length + 1);
+        return !relative.split(/[\\/]/u).includes('node_modules') && !/\.(?:[cm]?[jt]s|css)\.map$|\.tsbuildinfo$/u.test(relative);
+      } });
       copied.add(name);
       dependencies(dependency, output, new Set([...ancestors, dependency]));
     }
