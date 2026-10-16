@@ -1,0 +1,33 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, rm, chmod } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { Commander } from '../src/runtime.mjs';
+
+test('Codex duplex protocol: approvals, multiple turns, steer, interrupt and resume', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'commander-codex-'));
+  const command = fileURLToPath(new URL('./codex-fixture.mjs', import.meta.url)); await chmod(command, 0o755);
+  const commander = await new Commander({ dataDir: directory, providers: { codex: { command } } }).open();
+  t.after(async () => { await commander.close(); await rm(directory, { recursive: true, force: true }); });
+  const { id } = await commander.create({ provider: 'codex' });
+  const approvalReceived = new Promise(resolve => commander.on('event', event => { if (event.type === 'approval.requested') resolve(event.data); }));
+  await commander.submit(id, 'approval');
+  const approval = await approvalReceived;
+  commander.approve(id, approval.id, { allow: false });
+  await commander.wait(id);
+  assert.equal(commander.snapshot(id).status, 'idle');
+  assert.ok(commander.events(id).events.some(e => e.type === 'text.delta' && e.data.text === 'decline'));
+  await commander.submit(id, 'second'); await commander.wait(id);
+  await commander.submit(id, 'usage'); await commander.wait(id);
+  const usage = commander.events(id).events.filter(event => event.type === 'usage');
+  assert.equal(usage.length, 2); assert.deepEqual(usage.map(event => event.data.usage.totalTokens), [110, 220]);
+  assert.deepEqual(usage.map(event => event.data.usage.contextTokens), [100, 200]);
+  assert.notEqual(usage[0].data.id, usage[1].data.id);
+  await commander.submit(id, 'hang'); await commander.steer(id, 'steer'); await commander.interrupt(id); await commander.wait(id);
+  await commander.disconnect(id); await commander.connect(id);
+  assert.equal(commander.snapshot(id).nativeId, 'thread-fixture');
+  assert.equal((await commander.history(id)).thread.id, 'thread-fixture');
+  assert.equal((await commander.discover(id)).data.length, 1);
+});

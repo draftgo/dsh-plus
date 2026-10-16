@@ -1,0 +1,49 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+def linkWebDir = file('../../../dist/web')
+def generatedAssets = layout.buildDirectory.dir('generated/linkAssets')
+
+android {
+    namespace 'cn.draftgo.dshplus.link'
+    compileSdk 35
+    buildToolsVersion '35.0.0'
+
+    defaultConfig {
+        applicationId 'cn.draftgo.dshplus.link'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName '0.1.0'
+    }
+
+    buildFeatures { buildConfig true }
+    sourceSets {
+        main { assets.srcDir(generatedAssets) }
+    }
+}
+
+tasks.register('prepareLinkAssets') {
+    inputs.dir(linkWebDir).optional()
+    outputs.dir(generatedAssets)
+    doLast {
+        if (!new File(linkWebDir, 'index.html').isFile()) {
+            throw new GradleException('Missing Link Web assets: build plugins/link/dist/web before assembling Android')
+        }
+        def out = generatedAssets.get().asFile
+        delete(out)
+        out.mkdirs()
+        copy { from linkWebDir; into out }
+    }
+}
+preBuild.dependsOn(tasks.named('prepareLinkAssets'))
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.15.0'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.webkit:webkit:1.12.1'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
+}

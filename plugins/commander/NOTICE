@@ -1,0 +1,17 @@
+Provider SVG icons adapted from Paseo (https://github.com/getpaseo/paseo), Apache-2.0.
+Source: packages/app/src/assets/acp-provider-icons/{codex-acp,claude-acp,opencode}.svg.
+Brand names and marks belong to their respective owners.
+DeepSeek mark adapted from official DeepSeek Harness apps/web/public/favicon.svg (MIT, DeepSeek).
+
+Interface icons: Iconsax, vendored Linear/Bold SVGs from iconsax-react 0.0.8 (MIT), copyright ERFAN KHADIVAR. See client/assets/iconsax/LICENSE and SOURCE.md. Iconsax collection requested via https://www.freeicons.org/icons/iconsax.
+Alimama FangYuanTi VF: user-supplied font, original rights reserved by its author.
+Font assets are not covered by Commander's MIT license. See assets/fonts/README.md.
+
+Models settings UI reuses DeepSeek Harness ui-settings-models sources at build time.
+Copyright (c) 2026 DeepSeek, MIT License. See DEEPSEEK-LICENSE.
+
+Harness tool marks: Gemini, Grok, OpenClaw, MiniMax and Hermes adapted from CC Switch (MIT, Copyright (c) 2025 Jason Young). License retained in client/tool-brand-icon.jsx. Pi adapted from Paseo (Apache-2.0, see PASEO-LICENSE). Brand marks remain property of their owners.
+
+Supplier brand marks: vendored from CC Switch src/icons/extracted (MIT, Copyright (c) 2025 Jason Young); full notice retained in client/tool-brand-icon.jsx. Source details in client/assets/provider-brands/SOURCE.md. Marks remain property of their respective owners.
+
+Link bundles selfsigned/node-forge, React/ReactDOM, qrcode and their runtime dependencies. See lib/LINK-THIRD-PARTY-LICENSES.txt for license texts. The Android source uses AndroidX, OkHttp and ZXing via Maven dependencies and retains Gradle wrapper license notices. No reference/ds-harness-remote source was copied for Link.

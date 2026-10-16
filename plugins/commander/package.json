@@ -1,0 +1,96 @@
+{
+  "name": "@dowork/commander",
+  "displayName": "DSH-Plus",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH-Plus native coding agents, shared projects, voice and enhanced Harness UI",
+  "license": "MIT",
+  "main": "src/plugin.mjs",
+  "exports": {
+    ".": "./src/plugin.mjs",
+    "./runtime": "./src/runtime.mjs",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "bin": {
+    "commander": "src/cli.mjs"
+  },
+  "files": [
+    "src",
+    "cordis.patch.yml",
+    "config.example.json",
+    "config/routergo-deepseek.example.yml",
+    "README.md",
+    "TOOL-CONFIG.md",
+    "VERIFICATION.md",
+    "lib",
+    "assets/fonts/web",
+    "assets/fonts/manifest.json",
+    "assets/fonts/README.md",
+    "NOTICE",
+    "PASEO-LICENSE",
+    "DEEPSEEK-LICENSE",
+    "client/assets/iconsax/LICENSE",
+    "client/assets/iconsax/SOURCE.md",
+    "locale",
+    "voice/src",
+    "voice/client/audio-worklet.js",
+    "voice/README.md",
+    "voice/VERIFICATION.md",
+    "voice/locale",
+    "voice/STREAMING.md"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:native": "node --test test/native.mjs",
+    "start": "node src/cli.mjs",
+    "pack:check": "npm pack --dry-run --ignore-scripts",
+    "build:client": "node scripts/build-client.mjs"
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.300"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.5-alpha.2",
+    "@deepseek-ai/dsh-sandbox": "0.2.1-alpha.3",
+    "@deepseek-ai/dsh-scope": "0.2.1-alpha.3",
+    "@deepseek-ai/dsh-tools": "^0.2.1-alpha.3",
+    "esbuild": "^0.27.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.5-alpha.2"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-model-selection",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-settings-models"
+      ],
+      "platform": "web"
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-llm": "0.2.1-alpha.3",
+    "json5": "2.2.3",
+    "jsonc-parser": "3.3.1",
+    "smol-toml": "1.9.0",
+    "ws": "8.19.0",
+    "yaml": "2.9.0"
+  }
+}

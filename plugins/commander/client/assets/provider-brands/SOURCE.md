@@ -1,0 +1,1 @@
+Provider brand marks vendored from reference/cc-switch/src/icons/extracted (MIT, Copyright (c) 2025 Jason Young). Full MIT notice retained in ../../tool-brand-icon.jsx. Marks belong to their respective owners. Icons embedded locally; no remote image requests. DeepSeek/Anthropic monochrome shapes use their brand colors.

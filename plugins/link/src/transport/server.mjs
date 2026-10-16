@@ -1,0 +1,106 @@
+import { createServer } from 'node:https';
+import { readFile } from 'node:fs/promises';
+import { networkInterfaces } from 'node:os';
+import { isIP } from 'node:net';
+
+export const localAddresses = () => [...new Set(Object.values(networkInterfaces()).flatMap(items => (items ?? []).filter(x => !x.internal && !x.address.includes('%')).map(x => x.address)))];
+export const authority = (address, port) => `${isIP(address) === 6 ? `[${address}]` : address}:${port}`;
+
+export function validateConfig(input, prior) {
+  const value = { ...prior };
+  for (const key of ['enabled', 'host', 'port', 'publicUrl']) if (input[key] !== undefined) value[key] = input[key];
+  if (typeof value.enabled !== 'boolean') throw new Error('启用状态必须是布尔值');
+  if (!isIP(value.host) && value.host !== 'localhost') throw new Error('监听地址必须是 IP 或 localhost');
+  if (!Number.isInteger(value.port) || value.port < 0 || value.port > 65535) throw new Error('端口必须在 0 至 65535 之间');
+  if (typeof value.publicUrl !== 'string') throw new Error('公网地址无效');
+  value.publicUrl = value.publicUrl.trim().replace(/\/$/, '');
+  if (value.publicUrl) {
+    const url = new URL(value.publicUrl);
+    if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('请输入 HTTPS 公网地址，例如 https://desk.example.com，不包含子路径');
+    value.publicUrl = url.origin;
+  }
+  return value;
+}
+
+const headers = {
+  'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer',
+  'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+};
+const fail = (message, status = 400) => Object.assign(new Error(message), { status });
+async function body(request) {
+  if (!request.headers['content-type']?.startsWith('application/json')) throw fail('需要 application/json', 415);
+  let bytes = 0; const chunks = [];
+  for await (const chunk of request) {
+    bytes += chunk.length;
+    if (bytes > 256 * 1024) throw fail('请求过大', 413);
+    chunks.push(chunk);
+  }
+  const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw fail('请求必须是对象');
+  return input;
+}
+
+/** Separate encrypted carrier: it exposes only Link's allowlist, never the Host admin API. */
+export async function listen({ identity, config, webRoot, store, dispatch, onError }) {
+  const rates = new Map();
+  let active = true;
+  const send = (response, status, value, type = 'application/json; charset=utf-8') => {
+    if (response.destroyed) return;
+    response.writeHead(status, { ...headers, 'content-type': type });
+    response.end(type.startsWith('application/json') ? JSON.stringify(value) : value);
+  };
+  const server = createServer({ key: identity.key, cert: identity.cert, minVersion: 'TLSv1.2' }, async (req, res) => {
+    try {
+      if (!active) throw fail('Link 已关闭', 503);
+      const publicHost = config.publicUrl ? new URL(config.publicUrl).host : undefined;
+      const allowed = new Set(['localhost', '127.0.0.1', '::1', ...localAddresses(), config.host].map(a => authority(a, server.address().port)));
+      if (publicHost) allowed.add(publicHost);
+      const host = req.headers.host;
+      if (!host || !allowed.has(host)) throw fail('主机地址未授权', 403);
+      if (req.headers.origin && req.headers.origin !== `https://${host}`) throw fail('来源未授权', 403);
+      const url = new URL(req.url, `https://${host}`);
+      const ip = req.socket.remoteAddress ?? 'unknown';
+      const tick = Math.floor(Date.now() / 60_000);
+      if (rates.size > 1024) for (const [key, entry] of rates) if (entry.tick !== tick) rates.delete(key);
+      if (rates.size > 1024 && !rates.has(ip)) throw fail('请求过多', 429);
+      const rate = rates.get(ip)?.tick === tick ? rates.get(ip) : { tick, count: 0, pairs: 0 };
+      rates.set(ip, rate);
+      if (++rate.count > 600) throw fail('请求过多，请稍后重试', 429);
+      if (req.method === 'GET') {
+        if (url.pathname === '/link/api/info') return send(res, 200, { name: 'DSH Link', version: '0.1.0' });
+        const file = { '/link': 'index.html', '/link/': 'index.html', '/link/index.html': 'index.html', '/link/app.js': 'app.js', '/link/app.css': 'app.css' }[url.pathname];
+        if (!file) throw fail('未找到', 404);
+        if (url.pathname === '/link') { res.writeHead(308, { location: '/link/', ...headers }); return res.end(); }
+        let data;
+        try { data = await readFile(new URL(file, webRoot)); } catch (e) { if (e.code === 'ENOENT') throw fail('请先构建 Link 网页资源', 503); throw e; }
+        return send(res, 200, data, file.endsWith('.js') ? 'text/javascript; charset=utf-8' : file.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/html; charset=utf-8');
+      }
+      if (req.method !== 'POST') throw fail('不支持的方法', 405);
+      if (url.pathname === '/link/api/pair') {
+        if (++rate.pairs > 12) throw fail('配对请求过多', 429);
+        const input = await body(req);
+        return send(res, 200, store.request(input.code, input.name));
+      }
+      if (url.pathname === '/link/api/pair/status') {
+        const input = await body(req);
+        return send(res, 200, store.poll(input.requestId, input.pollToken));
+      }
+      if (url.pathname !== '/link/api/rpc') throw fail('未找到', 404);
+      const device = store.authenticate(req.headers.authorization?.replace(/^Bearer\s+/i, ''));
+      if (!device) throw fail('设备授权已失效，请重新配对', 401);
+      const input = await body(req);
+      if (!active || !store.state.devices.some(d => d.id === device.id)) throw fail('设备授权已失效', 401);
+      return send(res, 200, await dispatch(input, device));
+    } catch (e) { send(res, e.status ?? 400, { error: e.message }); }
+  });
+  server.requestTimeout = 15_000; server.headersTimeout = 10_000; server.keepAliveTimeout = 5_000;
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(config.port, config.host, () => { server.off('error', reject); resolve(); });
+  });
+  server.on('error', onError);
+  return {
+    port: server.address().port,
+    close: async () => { active = false; server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); rates.clear(); },
+  };
+}
