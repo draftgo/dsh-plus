@@ -1,0 +1,58 @@
+name: Publish verified Windows installer
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful DSH-Plus Windows installer run ID
+        required: true
+      release_tag:
+        description: Existing preview release tag
+        required: true
+        default: v0.1.0-link-preview
+permissions:
+  actions: read
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_ID: ${{ inputs.run_id }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      - name: Require a successful Windows installer build
+        run: |
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]]
+          gh run view "$RUN_ID" --json status,conclusion,workflowName,headBranch > source-run.json
+          python3 - <<'PY'
+          import json
+          run = json.load(open('source-run.json'))
+          assert run['status'] == 'completed' and run['conclusion'] == 'success', run
+          assert run['workflowName'] == 'DSH-Plus Windows installer' and run['headBranch'] == 'main', run
+          PY
+          gh release view "$RELEASE_TAG"
+      - uses: actions/download-artifact@v4
+        with:
+          name: dsh-plus-windows-x64
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          path: installer
+      - name: Publish installer and checksum
+        run: |
+          gh release download "$RELEASE_TAG" --pattern SHA256SUMS.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          files = list(Path('installer').glob('*-win-x64-setup.exe'))
+          assert len(files) == 1, files
+          executable = files[0]
+          assert executable.read_bytes()[:2] == b'MZ', 'Expected Windows executable'
+          checksum = hashlib.file_digest(executable.open('rb'), 'sha256').hexdigest()
+          path = Path('SHA256SUMS.txt')
+          lines = [line for line in path.read_text().splitlines() if line.split()[-1] != executable.name]
+          path.write_text('\n'.join([*lines, f'{checksum}  {executable.name}']) + '\n')
+          print(path.read_text())
+          PY
+          gh release upload "$RELEASE_TAG" installer/*-win-x64-setup.exe SHA256SUMS.txt --clobber
