@@ -41,17 +41,21 @@ const bootstrap = `
   Push $R0
   Push $R1
   Push $R2
+  Push $0
+  Push $1
   ReadEnvStr $R2 ELECTRON_RUN_AS_NODE
   System::Call 'Kernel32::SetEnvironmentVariable(t, t)i("ELECTRON_RUN_AS_NODE", "1").r0'
   nsExec::ExecToStack '"$INSTDIR\\DSH-Plus.exe" --expose-internals "$INSTDIR\\resources\\dsh-plus\\plugin-bundle.mjs" init-profile --resources "$INSTDIR\\resources" --runtime "$INSTDIR\\resources\\app.asar.unpacked\\dsh"'
   Pop $R0
   Pop $R1
   System::Call 'Kernel32::SetEnvironmentVariable(t, t)i("ELECTRON_RUN_AS_NODE", "$R2").r1'
-  ${If} $R0 != 0
+  \${If} $R0 != 0
     MessageBox MB_OK|MB_ICONSTOP "DSH-Plus profile setup failed. Close DSH and run this installer again.$\\r$\\n$R1" /SD IDOK
     SetErrorLevel 2
     Quit
-  ${EndIf}
+  \${EndIf}
+  Pop $1
+  Pop $0
   Pop $R2
   Pop $R1
   Pop $R0
