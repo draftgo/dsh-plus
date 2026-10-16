@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { delimiter } from 'node:path'
+import { delimiter, join } from 'node:path'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const engine = fileURLToPath(new URL('../deepseek-harness/', import.meta.url))
@@ -47,7 +47,10 @@ try {
   } else if (action === 'install' || Object.hasOwn(manifest.scripts, action ?? '')) {
     const args = action === 'install' ? ['pnpm', 'install', '--frozen-lockfile', ...extra] : ['pnpm', 'run', action, ...extra]
     const localCorepack = fileURLToPath(new URL('../node_modules/.toolchain/node_modules/corepack/dist/corepack.js', import.meta.url))
-    if (existsSync(localCorepack)) await run(existsSync(localNode) ? localNode : process.execPath, [localCorepack, ...args], engine)
+    const globalCorepack = (process.env.PATH ?? '').split(delimiter)
+      .map(directory => join(directory, 'node_modules/corepack/dist/corepack.js')).find(path => existsSync(path))
+    const corepack = existsSync(localCorepack) ? localCorepack : globalCorepack
+    if (corepack) await run(existsSync(localNode) ? localNode : process.execPath, [corepack, ...args], engine)
     else await run('corepack', args, engine)
   } else {
     throw new Error('Use npm run setup/build/dev/start/check or a documented packaging command.')
