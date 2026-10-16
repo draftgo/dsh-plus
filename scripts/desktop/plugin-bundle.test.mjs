@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -71,15 +72,64 @@ test('official profile loader resolves the preinstalled Plus bundle and respects
   assert.equal(existsSync(join(profile, 'lock')), false);
 });
 
-test('an active profile lock blocks installation before configuration changes', async t => {
-  if (!existsSync(officialBoot)) { t.skip('official built packages are unavailable'); return; }
+function enrollmentFixture(t) {
   const { root, put } = fixture(t);
   const modules = join(root, 'runtime/node_modules/@deepseek-ai'); mkdirSync(modules, { recursive: true });
   symlinkSync(join(officialRoot, 'packages/boot/app-boot'), join(modules, 'dsh-app-boot'), 'junction');
   symlinkSync(join(officialRoot, 'packages/util/home-paths'), join(modules, 'dsh-home-paths'), 'junction');
   put('runtime/node_modules/@dowork/commander/package.json', { name: '@dowork/commander', version: '0.1.0' });
   put('runtime/node_modules/@dowork/dsh-plus-desktop/package.json', { name: '@dowork/dsh-plus-desktop', version: '0.1.0' });
+  return { root, put, options: { runtime: join(root, 'runtime'), profile: join(root, 'profile') } };
+}
+
+const enrollmentOptions = { skip: !existsSync(officialBoot) };
+test('an active profile lock blocks installation before configuration changes', enrollmentOptions, async t => {
+  const { root, put, options } = enrollmentFixture(t);
+  const owner = `${process.pid}\n`;
+  put('profile/lock', owner);
+  await assert.rejects(initializePluginProfile(options), /busy/u);
+  assert.equal(existsSync(join(root, 'profile/package.json')), false);
+  assert.equal(readFileSync(join(root, 'profile/lock'), 'utf8'), owner);
+});
+
+test('a lock from a confirmed exited process is reclaimed and enrollment completes', enrollmentOptions, async t => {
+  const { root, put, options } = enrollmentFixture(t);
+  const exited = spawnSync(process.execPath, ['-e', ''], { encoding: 'utf8' });
+  assert.equal(exited.status, 0);
+  assert.throws(() => process.kill(exited.pid, 0), { code: 'ESRCH' });
+  put('profile/lock', `${exited.pid}\n`);
+  assert.equal((await initializePluginProfile(options)).enrolled, true);
+  const manifest = JSON.parse(readFileSync(join(root, 'profile/package.json'), 'utf8'));
+  assert.ok(manifest.dsh.profile.bundles.includes('@dowork/dsh-plus-desktop'));
+  assert.equal(existsSync(join(root, 'profile/lock')), false);
+});
+
+test('invalid lock owners and failed permission probes do not authorize lock removal', enrollmentOptions, async t => {
+  const { root, put, options } = enrollmentFixture(t);
+  for (const owner of ['', 'invalid', '0', '-1', '9007199254740992']) {
+    put('profile/lock', owner);
+    await assert.rejects(initializePluginProfile(options), /busy/u);
+    assert.equal(readFileSync(join(root, 'profile/lock'), 'utf8'), owner);
+  }
   put('profile/lock', `${process.pid}\n`);
-  await assert.rejects(initializePluginProfile({ runtime: join(root, 'runtime'), profile: join(root, 'profile') }), /busy/u);
+  t.mock.method(process, 'kill', () => { throw Object.assign(new Error('permission denied'), { code: 'EPERM' }); });
+  await assert.rejects(initializePluginProfile(options), /busy/u);
+  assert.equal(readFileSync(join(root, 'profile/lock'), 'utf8'), `${process.pid}\n`);
+  assert.equal(existsSync(join(root, 'profile/package.json')), false);
+});
+
+test('directory and symlink lock entries are rejected without deleting their targets', enrollmentOptions, async t => {
+  const { root, options } = enrollmentFixture(t);
+  const lock = join(root, 'profile/lock');
+  mkdirSync(lock, { recursive: true });
+  await assert.rejects(initializePluginProfile(options), /not a regular file/u);
+  assert.equal(existsSync(lock), true);
+  rmSync(lock, { recursive: true });
+  const target = join(root, 'lock-target');
+  mkdirSync(target);
+  symlinkSync(target, lock, 'junction');
+  await assert.rejects(initializePluginProfile(options), /not a regular file/u);
+  assert.equal(existsSync(lock), true);
+  assert.equal(existsSync(target), true);
   assert.equal(existsSync(join(root, 'profile/package.json')), false);
 });

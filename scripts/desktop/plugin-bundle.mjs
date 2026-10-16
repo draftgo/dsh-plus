@@ -1,6 +1,6 @@
 /** Build-time Plus packaging and one-time profile enrollment using the official bundle API. */
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, cpSync, existsSync, mkdirSync, openSync, closeSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, openSync, closeSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -115,12 +115,23 @@ export async function initializePluginProfile({ runtime, resources, profile }) {
   mkdirSync(profile, { recursive: true, mode: 0o700 });
   const marker = join(profile, MARKER);
   if (existsSync(marker)) return { profile, enrolled: false, reason: 'already-enrolled' };
-  const lock = join(profile, 'lock');
+  const lock = join(realpathSync(profile), 'lock');
   let descriptor;
   try { descriptor = openSync(lock, 'wx', 0o600); }
   catch (error) {
-    if (error.code === 'EEXIST') throw new Error('Plus bundle: Desktop profile is busy; close DSH before installing');
-    throw error;
+    if (error.code !== 'EEXIST') throw error;
+    const existing = lstatSync(lock);
+    if (existing.isSymbolicLink() || !existing.isFile()) throw new Error('Plus bundle: Desktop profile lock is not a regular file');
+    const owner = Number.parseInt(readFileSync(lock, 'utf8').trim(), 10);
+    let active = !Number.isSafeInteger(owner) || owner <= 0;
+    if (!active) {
+      try { process.kill(owner, 0); active = true; }
+      catch (signalError) { active = signalError.code !== 'ESRCH'; }
+    }
+    if (active) throw new Error('Plus bundle: Desktop profile is busy; close DSH before installing');
+    // Match the official Desktop lock policy: only ESRCH confirms that its owner exited.
+    unlinkSync(lock);
+    descriptor = openSync(lock, 'wx', 0o600);
   }
   const temporary = join(profile, `.dsh-plus-package-${process.pid}.tmp`);
   try {

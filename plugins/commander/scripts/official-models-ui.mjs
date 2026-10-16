@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { build as esbuild } from 'esbuild';
 
 const selector = fileURLToPath(new URL('../client/provider-settings.jsx', import.meta.url));
@@ -12,8 +13,8 @@ const once = (source, before, after, label) => {
 /** Strict build-only adaptation; the official submodule always stays untouched. */
 export function officialModelsUi() {
   return { name: 'commander-official-models-ui', setup(build) {
-    build.onLoad({ filter: /ui-settings-models\/src\/client\/ModelsSection\.tsx$/ }, async args => {
-      let source = await readFile(args.path, 'utf8');
+    build.onLoad({ filter: /ui-settings-models[\\/]src[\\/]client[\\/]ModelsSection\.tsx$/ }, async args => {
+      let source = (await readFile(args.path, 'utf8')).replaceAll('\r\n', '\n');
       source = 'import { ProviderSelect, ProviderBrandIcon } from ' + JSON.stringify(selector) + ';\n' + source;
       source = once(source, "const [addMode, setAddMode] = useState<AddMode>('catalog')", "const [addMode, setAddMode] = useState<AddMode>('catalog')\n  const [providerPreset, setProviderPreset] = useState<any>(undefined)", 'preset state');
       const start = source.indexOf('                      <select\n');
@@ -40,8 +41,8 @@ export function officialModelsUi() {
       source = once(source, '                    setSavedTarget(undefined)\n                    setEditing(first === undefined', '                    setSavedTarget(undefined)\n                    setProviderPreset(undefined)\n                    setEditing(first === undefined', 'clear preset');
       return { contents: source, loader: 'tsx', resolveDir: dirname(args.path) };
     });
-    build.onLoad({ filter: /ui-settings-models\/src\/client\/CustomProviderCard\.tsx$/ }, async args => {
-      let source = await readFile(args.path, 'utf8');
+    build.onLoad({ filter: /ui-settings-models[\\/]src[\\/]client[\\/]CustomProviderCard\.tsx$/ }, async args => {
+      let source = (await readFile(args.path, 'utf8')).replaceAll('\r\n', '\n');
       source = 'import { ProviderHarnessField, useProviderHarness, ProviderBrandIcon } from ' + JSON.stringify(selector) + ';\n' + source;
       source = once(source, 'export interface CustomProviderCardProps {', 'export interface CustomProviderCardProps {\n  preset?: { id: string; name: string; baseURL: string; protocol: string }', 'preset interface');
       for (const [name, field] of [['route', 'id'], ['displayName', 'name'], ['baseURL', 'baseURL']]) {
@@ -55,8 +56,8 @@ export function officialModelsUi() {
       source = once(source, '    } finally {\n      setBusy(false)', '    } catch (error) {\n      setFailure(error instanceof Error ? error.message : String(error))\n    } finally {\n      setBusy(false)', 'custom harness failure');
       return { contents: source, loader: 'tsx', resolveDir: dirname(args.path) };
     });
-    build.onLoad({ filter: /ui-settings-models\/src\/client\/ProviderEditor\.tsx$/ }, async args => {
-      let source = await readFile(args.path, 'utf8');
+    build.onLoad({ filter: /ui-settings-models[\\/]src[\\/]client[\\/]ProviderEditor\.tsx$/ }, async args => {
+      let source = (await readFile(args.path, 'utf8')).replaceAll('\r\n', '\n');
       source = 'import { ProviderHarnessField, useProviderHarness, ProviderBrandIcon } from ' + JSON.stringify(selector) + ';\n' + source;
       source = once(source, "            <span className={styles['editorTitle']}>{props.displayName}</span>", "            <ProviderBrandIcon id={props.provider} name={props.displayName} declared={props.declared === true} />\n            <span className={styles['editorTitle']}>{props.displayName}</span>", 'provider editor brand');
       source = once(source, '  const { namespace, schema, settingsPath, operations, t } = props', '  const { namespace, schema, settingsPath, operations, t } = props\n  const harness = useProviderHarness(props.provider)', 'provider harness draft');
@@ -65,8 +66,8 @@ export function officialModelsUi() {
       source = once(source, '    } finally {\n      setBusy(false)', '    } catch (error) {\n      setFailure(error instanceof Error ? error.message : String(error))\n    } finally {\n      setBusy(false)', 'provider harness failure');
       return { contents: source, loader: 'tsx', resolveDir: dirname(args.path) };
     });
-    build.onLoad({ filter: /ui-settings-models\/src\/client\/ModelsSection\.module\.css$/ }, async args => {
-      const result = await esbuild({ stdin: { contents: 'import styles from ' + JSON.stringify(args.path) + '; export default styles;', resolveDir: dirname(args.path) }, bundle: true, write: false, outdir: '/tmp/commander-css-memory', format: 'cjs', loader: { '.css': 'local-css' }, logLevel: 'silent' });
+    build.onLoad({ filter: /ui-settings-models[\\/]src[\\/]client[\\/]ModelsSection\.module\.css$/ }, async args => {
+      const result = await esbuild({ stdin: { contents: 'import styles from ' + JSON.stringify(args.path) + '; export default styles;', resolveDir: dirname(args.path) }, bundle: true, write: false, outdir: join(tmpdir(), 'commander-css-memory'), format: 'cjs', loader: { '.css': 'local-css' }, logLevel: 'silent' });
       const js = result.outputFiles.find(file => file.path.endsWith('.js'));
       const css = result.outputFiles.find(file => file.path.endsWith('.css'));
       if (!js || !css) throw new Error('Official Models CSS module did not compile');
