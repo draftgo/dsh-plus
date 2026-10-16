@@ -33,4 +33,10 @@ appId 为 `cn.draftgo.dshplus`，Electron 用户界面数据与原版隔离。Ha
 
 Plus 的构建只扩展打包组合，不恢复旧社区 Stable/Beta/Next 或 runtime patches。官方原有模块内部准备步骤保持原样。参考旧 `dsh-desktop` 提交 `47574b1a83` 的原生 Windows + NSIS 交付方式。
 
-当前构建状态以 Actions 实际结果为准。安装包只有通过 Windows 构建与必要 smoke 后才上传 Releases；本地 Linux 的 3 项预装测试与真实 owner 管理 API 联调不能代替 EXE 或 Windows 安装成功。
+## 已验证交付
+
+2026-10-17（北京时间），提交 `8f203ca0d1` 的 Windows Actions `38928099138` 完成。产物 `dsh-plus-0.1.0-win-x64-setup.exe` 包含完整官方 Desktop 与预装 Plus，不要求先安装 DSH。
+
+Windows CI 已通过：官方完整构建、运行时完整性校验、离线插件安装/移除、办公文件转 PDF、打包后 Host 启动、Plus profile 初始化、owner 认证 Link 管理 API，以及 NSIS 静默安装和预装 Plus 检查。
+
+未验证：人工 Windows GUI 首次启动、真实模型调用、手机真机与公网蜂窝网络。安装器为未签名预览版，SmartScreen 可能提示。下载通过 `draftgo/dsh-plus` Releases 提供。

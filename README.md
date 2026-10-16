@@ -18,7 +18,7 @@ dsh plugin --profile desktop add ./plugins/commander
 
 公网：配置自己可达的 HTTPS 根地址，按 [Nginx 示例](plugins/link/config/nginx.example.conf) 反代 `/link/`；Android App 或手机/电脑浏览器配对后接入。公网模式不会自动打通家中 NAT；iPhone 首版使用公网网页。
 
-下载验收包见 [Releases](https://github.com/draftgo/dsh-plus/releases)。Android debug 包用于验收；没有 iOS 原生包。Windows/macOS Desktop、手机真机与蜂窝网络验收边界见 [实现记录](Design/Link入口与移动端实现记录.md)。
+下载验收包见 [Releases](https://github.com/draftgo/dsh-plus/releases)。完整 Windows EXE 内置官方 DSH、Plus、Voice 与 Link，安装后无需再装插件；已通过 Windows CI 构建和静默安装。Android debug 包用于验收；没有 iOS 原生包。人工桌面、手机真机与蜂窝网络验收边界见 [实现记录](Design/Link入口与移动端实现记录.md)。
 
 ## 项目结构
 

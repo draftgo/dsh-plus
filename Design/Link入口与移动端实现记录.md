@@ -19,7 +19,7 @@ plugins/link/
   scripts/                 Web 构建
   test/                    自动测试及可选真实 Harness 联调
 Design/                    设计与实现记录
-artifacts/                 本地插件包 / APK，二进制不提交 Git
+artifacts/                 本地插件包 / APK / Windows EXE，分类存放、二进制不提交 Git
 deepseek-harness/          锁定版本的官方子模块，未修改源码
 reference/                 只读参考，不参与依赖、打包或上传
 ```
@@ -44,13 +44,14 @@ reference/                 只读参考，不参与依赖、打包或上传
 - 隔离真实 Harness 联调通过 owner 认证、工作区注册、TLS CA / QR SPKI、配对确认、模型/会话创建与幂等、消息、实时文本、最终历史、真实官方审批拒绝及设备撤销。
 - 联调模型仅请求本机临时 SSE mock，没有调用外部模型，也没有改动现有服务。测试审批拒绝后不启动原生 CLI。
 - Android `assembleDebug` 真实构建通过，生成验收用 debug APK。
+- 2026-10-17（北京时间），Windows Actions `38928099138` 通过完整 EXE 构建、官方运行时校验、打包后 Host 与 Link owner API 联调、NSIS 静默安装及 Plus 自动启用。完整安装包包含官方 DSH + Plus + Voice + Link，详见 [桌面交付](../scripts/desktop/README.md)。
 - 根 `npm run check` 通过，仅证明 pin、入口和工作区一致性。官方版本 `0.2.1-alpha.3`，提交 `571902028a75c64c1d767f4ae5fd099485f0ddf0`。
 
 真实联调脚本 `plugins/link/test/live-harness.mjs` 是可选环境测试，不纳入默认单元测试。需已安装官方引擎及含 DSH-Plus 的 Web profile；通过 `LINK_HARNESS_NODE_MODULES` 指向该 profile 的 node_modules，通过 `LINK_TEST_NODE` 指定符合官方要求的 Node。脚本使用隔离数据目录与本机 mock，不读取模型密钥，退出后清理临时进程和目录。
 
 ## 尚待验收
 
-Android `assembleDebug` 已真实构建成功，验收产物归类在 `artifacts/android/`；签名与设备验收边界见 [移动端记录](../plugins/link/mobile/README.md)。没有真机完成扫码、相机授权、软键盘、切后台恢复和安装验收。Windows/macOS 官方 Desktop 插件安装、iPhone Safari、真实反代与蜂窝网络尚未实测，不能由 Linux API 联调代替。
+Android `assembleDebug` 已真实构建成功，验收产物归类在 `artifacts/android/`；签名与设备验收边界见 [移动端记录](../plugins/link/mobile/README.md)。没有真机完成扫码、相机授权、软键盘、切后台恢复和安装验收。Windows 完整 EXE 已通过 CI 静默安装，尚未人工验收 GUI；macOS 安装、iPhone Safari、真实反代与蜂窝网络尚未实测。
 
 本版不提供 iOS 原生安装包、桌面投屏、远程文件编辑、终端、公共中继、VPN、穿透或远程语音。公网需要用户已具备到执行主机的可达路径；家中主机不能仅凭一个域名被手机流量访问。
 
