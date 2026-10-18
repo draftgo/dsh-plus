@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { copyFile } from 'node:fs/promises';
+import { copyFile, access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createElectronBuilderConfig } from '../../deepseek-harness/apps/desktop/scripts/electron-builder-config.mjs';
 import { prepareDesktopBrand } from './prepare-brand.mjs';
@@ -45,7 +45,19 @@ config.asarUnpack.push('**/dsh/**/*');
 config.extraResources.push({ from: `${root}/scripts/desktop/plugin-bundle.mjs`, to: 'dsh-plus/plugin-bundle.mjs' });
 config.extraResources.push({ from: `${root}/plugins/commander/shared/plugin-install.mjs`, to: 'dsh-plus/shared/plugin-install.mjs' });
 config.extraResources.push({ from: `${root}/plugins/commander/shared/update-feed.mjs`, to: 'dsh-plus/shared/update-feed.mjs' });
-config.extraResources.push({ from: `${root}/deepseek-harness/apps/desktop/.desktop-build/targets/win-x64/plus-seed`, to: 'dsh-plus/seed' });
+const pluginSeed = `${root}/deepseek-harness/apps/desktop/.desktop-build/targets/win-x64/plus-seed`;
+config.extraResources.push({ from: pluginSeed, to: 'dsh-plus/seed', filter: ['**/*'] });
+// Like the official runtime mapping, the seed needs an explicit node_modules
+// source: electron-builder excludes a source directory's root node_modules.
+config.extraResources.push({ from: `${pluginSeed}/node_modules`, to: 'dsh-plus/seed/node_modules', filter: ['**/*'] });
+const officialAfterPack = config.afterPack;
+config.afterPack = async context => {
+  await officialAfterPack?.(context);
+  const seed = `${context.appOutDir}/resources/dsh-plus/seed`;
+  for (const file of ['release.json', 'node_modules/dsh-plus/package.json', 'node_modules/dsh-plus/src/plugin.mjs', 'node_modules/dsh-plus/lib/client.js', 'node_modules/dsh-plus/lib/link.mjs', 'node_modules/dsh-plus/lib/link-web/index.html', 'node_modules/dsh-plus/voice/src/plugin.mjs']) {
+    await access(`${seed}/${file}`);
+  }
+};
 config.publish = [{ provider: 'generic', url: 'https://ghfast.top/https://github.com/draftgo/dsh-plus/releases/download/app-updates/', channel: 'latest' }];
 config.nsis.include = `${root}/.local/desktop/installer-plus.nsh`;
 export default config;
