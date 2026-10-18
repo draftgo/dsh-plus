@@ -62,7 +62,7 @@ export class ClaudeProvider {
       canUseTool: async (toolName, toolInput, options) => {
         const isQuestion = toolName === 'AskUserQuestion';
         const answer = await host.approval({ kind: isQuestion ? 'question' : 'permission', method: toolName, nativeRequestId: options.toolUseID, details: isQuestion ? toolInput : { toolName, input: toolInput } }, options.signal);
-        return answer.allow === true ? { behavior: 'allow', updatedInput: isQuestion ? { ...toolInput, answers: answer.answers } : toolInput } : { behavior: 'deny', message: 'Denied by Commander user' };
+        return answer.allow === true ? { behavior: 'allow', updatedInput: isQuestion ? { ...toolInput, answers: answer.answers } : toolInput } : { behavior: 'deny', message: 'Denied by DSH-Plus user' };
       },
     } });
     const pump = (async () => {

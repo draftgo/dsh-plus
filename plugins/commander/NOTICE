@@ -5,7 +5,7 @@ DeepSeek mark adapted from official DeepSeek Harness apps/web/public/favicon.svg
 
 Interface icons: Iconsax, vendored Linear/Bold SVGs from iconsax-react 0.0.8 (MIT), copyright ERFAN KHADIVAR. See client/assets/iconsax/LICENSE and SOURCE.md. Iconsax collection requested via https://www.freeicons.org/icons/iconsax.
 Alimama FangYuanTi VF: user-supplied font, original rights reserved by its author.
-Font assets are not covered by Commander's MIT license. See assets/fonts/README.md.
+Font assets are not covered by DSH-Plus's MIT license. See assets/fonts/README.md.
 
 Models settings UI reuses DeepSeek Harness ui-settings-models sources at build time.
 Copyright (c) 2026 DeepSeek, MIT License. See DEEPSEEK-LICENSE.

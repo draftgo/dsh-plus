@@ -6,7 +6,7 @@ import { UIIcon } from './iconsax.jsx';
 import { formatTokens } from './usage-state.mjs';
 import { UsageCharts } from './usage-chart.jsx';
 const names = { codex: 'Codex', claude: 'Claude Code', pi: 'Pi', opencode: 'OpenCode', gemini: 'Gemini CLI', hermes: 'Hermes', grok: 'Grok Build', mcode: 'MiniMax Code', harness: 'Harness' };
-const sources = { harness: 'Harness 会话', 'official-harness': 'Harness 会话', commander: 'Commander', 'commander-native': 'Commander', 'native-history': '本机工具日志', machine: '本机工具日志' };
+const sources = { harness: 'Harness 会话', 'official-harness': 'Harness 会话', commander: 'DSH-Plus', 'commander-native': 'DSH-Plus', 'native-history': '本机工具日志', machine: '本机工具日志' };
 const number = value => value == null ? '未提供' : new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 }).format(value);
 const date = value => { const day = new Date(value); return [day.getFullYear(), String(day.getMonth() + 1).padStart(2, '0'), String(day.getDate()).padStart(2, '0')].join('-'); };
 function range(days) { const end = new Date(); end.setHours(0, 0, 0, 0); const start = new Date(end); start.setDate(start.getDate() - days + 1); return { start: date(start), end: date(end) }; }

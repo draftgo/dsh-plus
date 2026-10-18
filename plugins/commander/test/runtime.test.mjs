@@ -198,7 +198,7 @@ test('remove releases an idle driver and persists record deletion while retainin
   assert.deepEqual(await commander.remove(parent.id), { id: parent.id, removed: true });
   assert.equal(closed, true);
   assert.equal(commander.drivers.has(parent.id), false);
-  assert.throws(() => commander.snapshot(parent.id), /Unknown Commander session/);
+  assert.throws(() => commander.snapshot(parent.id), /Unknown DSH-Plus session/);
   assert.equal(commander.snapshot(child.id).parentId, undefined);
   assert.equal(await readFile(nativeHistory, 'utf8'), 'native history remains');
   await access(directory);

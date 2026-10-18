@@ -7,6 +7,7 @@ import { apply as applyVoice } from '../voice/src/plugin.mjs';
 import { createModelProviders } from './model-providers.mjs';
 import { mountUsage } from './usage.mjs';
 import { mountTooling } from './tooling.mjs';
+import { mountUpdates } from './updates.mjs';
 import { mountLink } from '../lib/link.mjs';
 
 export const name = 'commander';
@@ -24,7 +25,7 @@ export async function apply(ctx, config = {}) {
     await mountTooling(child, commander, providers);
     await applyVoice(child, { ...config.voice, providers });
   });
-  ctx.inject(['connection'], async child => { await mountUsage(child, commander, config.usage ?? {}); });
+  ctx.inject(['connection'], async child => { await mountUsage(child, commander, config.usage ?? {}); await mountUpdates(child, commander); });
   ctx.inject(['connection', 'workspaceRegistry'], async child => { await mountWeb(child, commander, config); });
   ctx.inject(['connection', 'workspaceRegistry', 'typertGateway', 'sessionController', 'webServer', 'clientModules'], async child => {
     await mountLink(child, { ...config.link, directory: config.link?.directory, webRoot: new URL('../lib/link-web/', import.meta.url) });
@@ -34,12 +35,12 @@ export async function apply(ctx, config = {}) {
   ctx.inject(['llm', 'agents', 'workspaceRegistry'], child => { mountHarnessAdapter(child, commander, { bindOwner: (id, agent) => owners.set(id, agent) }); });
   const ownerId = exec => {
     const id = exec.agent?.session?.id;
-    if (!id) throw new Error('Commander tools require a Harness Agent session');
+    if (!id) throw new Error('DSH-Plus tools require a Harness Agent session');
     return String(id);
   };
   const owned = (id, exec) => {
     const session = commander.snapshot(id);
-    if (session.ownerSessionId !== ownerId(exec)) throw new Error('Commander session belongs to a different Harness session');
+    if (session.ownerSessionId !== ownerId(exec)) throw new Error('DSH-Plus session belongs to a different Harness session');
     owners.set(id, exec.agent);
     return session;
   };
@@ -100,7 +101,7 @@ export async function apply(ctx, config = {}) {
     provider: { type: 'string', enum: ['codex', 'claude', 'pi', 'opencode', 'gemini', 'hermes', 'grok', 'mcode'] },
     cwd: string('Absolute working directory'), model: string('Optional native model ID'), providerId: string('Optional configured DSH supplier ID; requires model and creates an isolated session, never changes the local CLI profile'),
     nativeId: string('Existing native thread/session handle to resume, only after its original writer is stopped'),
-    parentId: string('Optional Commander parent session for delegation'),
+    parentId: string('Optional DSH-Plus parent session for delegation'),
   }, ['provider', 'cwd'], async (args, exec) => {
     const ownerSessionId = ownerId(exec);
     if (args.parentId) owned(args.parentId, exec);
@@ -115,20 +116,20 @@ export async function apply(ctx, config = {}) {
     owners.set(session.id, exec.agent);
     return session;
   });
-  register('commander_connect', 'Reconnect a previously owned native session using its saved handle. Never recreates a missing handle.', { id: string('Commander session ID') }, ['id'], async ({ id }, exec) => { owned(id, exec); return commander.connect(id); });
+  register('commander_connect', 'Reconnect a previously owned native session using its saved handle. Never recreates a missing handle.', { id: string('DSH-Plus session ID') }, ['id'], async ({ id }, exec) => { owned(id, exec); return commander.connect(id); });
   register('commander_send', 'Submit another prompt to an idle native session. Returns an enqueue receipt; inspect events/wait for completion. Reuse requestId when retrying; never resubmit an uncertain receipt blindly.', {
-    id: string('Commander session ID'), text: string('Task or follow-up text'), requestId: string('Stable unique idempotency key for this input'),
+    id: string('DSH-Plus session ID'), text: string('Task or follow-up text'), requestId: string('Stable unique idempotency key for this input'),
   }, ['id', 'text', 'requestId'], async ({ id, text, requestId }, exec) => { owned(id, exec); return commander.submit(id, text, { requestId }); });
-  register('commander_events', 'Read streamed text, native tool activity and completion events after a cursor. If truncated is true, older Commander events have been pruned; inspect native history.', {
-    id: string('Commander session ID'), after: { type: 'integer', minimum: 0 },
+  register('commander_events', 'Read streamed text, native tool activity and completion events after a cursor. If truncated is true, older DSH-Plus events have been pruned; inspect native history.', {
+    id: string('DSH-Plus session ID'), after: { type: 'integer', minimum: 0 },
   }, ['id'], async ({ id, after }, exec) => { owned(id, exec); return commander.events(id, after); });
   register('commander_wait', 'Wait at most 60 seconds for a native session to become idle or fail. Task continues if this wait is cancelled or times out.', {
-    id: string('Commander session ID'), timeout: { type: 'integer', minimum: 0, maximum: 60000 },
+    id: string('DSH-Plus session ID'), timeout: { type: 'integer', minimum: 0, maximum: 60000 },
   }, ['id'], async ({ id, timeout }, exec) => { owned(id, exec); return commander.wait(id, { timeout, signal: exec.signal }); });
-  register('commander_interrupt', 'Interrupt an active native turn. Does not roll back completed tool side effects.', { id: string('Commander session ID') }, ['id'], async ({ id }, exec) => { owned(id, exec); await commander.interrupt(id); return commander.snapshot(id); });
-  register('commander_steer', 'Steer an active native turn only if the provider supports it.', { id: string('Commander session ID'), text: string('Steering text') }, ['id', 'text'], async ({ id, text }, exec) => { owned(id, exec); await commander.steer(id, text); return commander.snapshot(id); });
-  register('commander_close', 'Release a native session process while retaining its history and handle.', { id: string('Commander session ID') }, ['id'], async ({ id }, exec) => { owned(id, exec); return commander.disconnect(id); });
-  register('commander_history', 'Read the owned session native conversation history. Requires an active connection and provider support.', { id: string('Commander session ID') }, ['id'], async ({ id }, exec) => { owned(id, exec); return { history: await commander.history(id) }; });
-  register('commander_discover', 'Discover native session handles in the owned session working directory, when the provider supports it. Stop other writers before importing.', { id: string('Commander session ID') }, ['id'], async ({ id }, exec) => { owned(id, exec); return { sessions: await commander.discover(id) }; });
-  register('commander_archive', 'Archive an owned external session and release its process, or unarchive it without automatically running tasks.', { id: string('Commander session ID'), archived: { type: 'boolean' } }, ['id'], async ({ id, archived = true }, exec) => { owned(id, exec); return commander.archive(id, archived); });
+  register('commander_interrupt', 'Interrupt an active native turn. Does not roll back completed tool side effects.', { id: string('DSH-Plus session ID') }, ['id'], async ({ id }, exec) => { owned(id, exec); await commander.interrupt(id); return commander.snapshot(id); });
+  register('commander_steer', 'Steer an active native turn only if the provider supports it.', { id: string('DSH-Plus session ID'), text: string('Steering text') }, ['id', 'text'], async ({ id, text }, exec) => { owned(id, exec); await commander.steer(id, text); return commander.snapshot(id); });
+  register('commander_close', 'Release a native session process while retaining its history and handle.', { id: string('DSH-Plus session ID') }, ['id'], async ({ id }, exec) => { owned(id, exec); return commander.disconnect(id); });
+  register('commander_history', 'Read the owned session native conversation history. Requires an active connection and provider support.', { id: string('DSH-Plus session ID') }, ['id'], async ({ id }, exec) => { owned(id, exec); return { history: await commander.history(id) }; });
+  register('commander_discover', 'Discover native session handles in the owned session working directory, when the provider supports it. Stop other writers before importing.', { id: string('DSH-Plus session ID') }, ['id'], async ({ id }, exec) => { owned(id, exec); return { sessions: await commander.discover(id) }; });
+  register('commander_archive', 'Archive an owned external session and release its process, or unarchive it without automatically running tasks.', { id: string('DSH-Plus session ID'), archived: { type: 'boolean' } }, ['id'], async ({ id, archived = true }, exec) => { owned(id, exec); return commander.archive(id, archived); });
 }

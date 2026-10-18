@@ -5,11 +5,18 @@ on:
       release_tag:
         description: Existing release tag to receive the APK
         required: true
-        default: v0.1.1
+        default: v0.1.2
+      publish:
+        description: Publish the verified APK to the release
+        type: boolean
+        required: true
+        default: false
 permissions:
   contents: read
 jobs:
   package:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -36,10 +43,27 @@ jobs:
         shell: bash
         run: |
           test -f plugins/link/mobile/android/app/build/outputs/apk/debug/app-debug.apk
-          $ANDROID_HOME/build-tools/35.0.0/aapt dump badging plugins/link/mobile/android/app/build/outputs/apk/debug/app-debug.apk | grep "versionName='0.1.1'"
+          version=$(node -p "JSON.parse(require('fs').readFileSync('plugins/commander/package.json','utf8')).version")
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging plugins/link/mobile/android/app/build/outputs/apk/debug/app-debug.apk | grep "versionName='$version'"
+          cp plugins/link/mobile/android/app/build/outputs/apk/debug/app-debug.apk "dsh-plus-${version}-android-debug.apk"
       - uses: actions/upload-artifact@v4
         with:
-          name: dsh-plus-android-0.1.1-debug
-          path: plugins/link/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          name: dsh-plus-android-debug
+          path: dsh-plus-*-android-debug.apk
           if-no-files-found: error
           retention-days: 14
+      - name: Publish verified Android APK
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "JSON.parse(require('fs').readFileSync('plugins/commander/package.json','utf8')).version")
+          test "$RELEASE_TAG" = "v${version}"
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "DSH-Plus ${version}" --notes "DSH-Plus application release with Xiaojiao branding and independent plugin updates. Android APK is a debug build for device testing." --latest=false
+          fi
+          gh release upload "$RELEASE_TAG" "dsh-plus-${version}-android-debug.apk" --clobber

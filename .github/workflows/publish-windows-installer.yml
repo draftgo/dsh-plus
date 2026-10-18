@@ -6,9 +6,9 @@ on:
         description: Successful DSH-Plus Windows installer run ID
         required: true
       release_tag:
-        description: Existing preview release tag
+        description: Application release tag (must match the installer version)
         required: true
-        default: v0.1.1
+        default: v0.1.2
 permissions:
   actions: read
   contents: write
@@ -22,6 +22,12 @@ jobs:
       RUN_ID: ${{ inputs.run_id }}
       RELEASE_TAG: ${{ inputs.release_tag }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - name: Require a successful Windows installer build
         run: |
           [[ "$RUN_ID" =~ ^[0-9]+$ ]]
@@ -32,7 +38,6 @@ jobs:
           assert run['status'] == 'completed' and run['conclusion'] == 'success', run
           assert run['workflowName'] == 'DSH-Plus Windows installer' and run['headBranch'] == 'main', run
           PY
-          gh release view "$RELEASE_TAG"
       - uses: actions/download-artifact@v4
         with:
           name: dsh-plus-windows-x64
@@ -41,13 +46,23 @@ jobs:
           path: installer
       - name: Publish installer and checksum
         run: |
-          gh release download "$RELEASE_TAG" --pattern SHA256SUMS.txt
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --json assets > source-release.json 2>/dev/null; then
+            if python3 -c 'import json,sys; sys.exit(0 if any(a["name"] == "SHA256SUMS.txt" for a in json.load(open("source-release.json"))["assets"]) else 1)'; then
+              gh release download "$RELEASE_TAG" --pattern SHA256SUMS.txt
+            else
+              touch SHA256SUMS.txt
+            fi
+          else
+            touch SHA256SUMS.txt
+          fi
           python3 - <<'PY'
           from pathlib import Path
-          import hashlib
+          import hashlib, os
           files = list(Path('installer').glob('*-win-x64-setup.exe'))
           assert len(files) == 1, files
           executable = files[0]
+          assert executable.name == f"dsh-plus-{os.environ['RELEASE_TAG'].removeprefix('v')}-win-x64-setup.exe", 'Installer version must match the release tag'
           assert executable.read_bytes()[:2] == b'MZ', 'Expected Windows executable'
           checksum = hashlib.file_digest(executable.open('rb'), 'sha256').hexdigest()
           path = Path('SHA256SUMS.txt')
@@ -55,4 +70,23 @@ jobs:
           path.write_text('\n'.join([*lines, f'{checksum}  {executable.name}']) + '\n')
           print(path.read_text())
           PY
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            source_sha=$(gh run view "$RUN_ID" --json headSha --jq .headSha)
+            gh release create "$RELEASE_TAG" --target "$source_sha" --title "DSH-Plus ${RELEASE_TAG}" --notes "Verified Windows application release. Daily feature updates use the separate plugin channel." --latest=false
+          fi
           gh release upload "$RELEASE_TAG" installer/*-win-x64-setup.exe SHA256SUMS.txt --clobber
+      - name: Publish isolated application update channel
+        run: |
+          set -euo pipefail
+          executable=$(find installer -maxdepth 1 -name '*-win-x64-setup.exe' -print -quit)
+          filename=$(basename "$executable")
+          version="${filename#dsh-plus-}"
+          version="${version%-win-x64-setup.exe}"
+          node scripts/desktop/create-app-update-feed.mjs "$executable" "$version"
+          if ! gh release view app-updates >/dev/null 2>&1; then
+            gh release create app-updates --title "DSH-Plus application update channel" --notes "Application update feed. Daily feature updates use the separate plugin channel." --latest=false
+          fi
+          gh release upload app-updates installer/*-win-x64-setup.exe installer/latest.yml --clobber
+          for blockmap in installer/*.blockmap; do
+            [ ! -f "$blockmap" ] || gh release upload app-updates "$blockmap" --clobber
+          done

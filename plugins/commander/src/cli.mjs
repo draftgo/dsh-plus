@@ -6,7 +6,7 @@ import { Commander } from './runtime.mjs';
 
 const { values } = parseArgs({ options: { 'data-dir': { type: 'string' }, config: { type: 'string' }, stdio: { type: 'boolean' }, help: { type: 'boolean' } } });
 if (values.help) {
-  console.log('Commander [--data-dir PATH] [--config JSON_FILE] [--stdio]\nInteractive native session control. --stdio is a trusted local JSONL API, not a network server.');
+  console.log('dsh-plus [--data-dir PATH] [--config JSON_FILE] [--stdio]\nInteractive native session control. --stdio is a trusted local JSONL API, not a network server.');
   process.exit(0);
 }
 const config = values.config ? JSON.parse(await readFile(values.config, 'utf8')) : {};
@@ -22,7 +22,7 @@ const stop = async () => {
 };
 process.on('SIGTERM', () => void stop());
 process.on('SIGINT', () => void stop());
-commander.on('fault', error => { process.stderr.write(`Commander persistence error: ${error.message}\n`); void stop(); });
+commander.on('fault', error => { process.stderr.write(`DSH-Plus persistence error: ${error.message}\n`); void stop(); });
 commander.on('event', event => {
   if (values.stdio) json({ event });
   else if (event.sessionId === selected) {
@@ -53,7 +53,7 @@ async function dispatch(method, params) {
   }
 }
 
-if (!values.stdio) console.log('Commander · 指挥官\n/new codex|claude|pi|opencode|gemini|hermes|grok|mcode [cwd]  /list  /use ID  /resume ID\n/steer TEXT  /stop  /approve ID yes|no  /answer ID JSON\n/events [cursor]  /history  /discover  /close  /archive  /quit\n输入普通文字向当前会话发送任务。原生会话导入使用 --stdio create 的 nativeId。');
+if (!values.stdio) console.log('DSH-Plus\n/new codex|claude|pi|opencode|gemini|hermes|grok|mcode [cwd]  /list  /use ID  /resume ID\n/steer TEXT  /stop  /approve ID yes|no  /answer ID JSON\n/events [cursor]  /history  /discover  /close  /archive  /quit\n输入普通文字向当前会话发送任务。原生会话导入使用 --stdio create 的 nativeId。');
 
 // Requests can overlap in JSONL mode so an approval can be answered while a
 // wait request is pending. Commander owns session mutation serialization.

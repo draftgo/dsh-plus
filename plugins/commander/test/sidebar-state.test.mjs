@@ -1,7 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {isRecentWorkspace,projectWorkspaces,recentRows,startSidebarSession,isSidebarSessionSelected,sidebarWorkspaces} from '../client/sidebar-state.mjs';
+import {isRecentWorkspace,projectWorkspaces,recentRows,startSidebarSession,isSidebarSessionSelected,sidebarWorkspaces,ensureSidebarWorkspace,sidebarSessionStatus} from '../client/sidebar-state.mjs';
 const projects=[{id:'auto',isDefault:true,title:'default-workspace',path:'/home/user/Documents/deepseek-harness/default-workspace'},{id:'user',title:'default-workspace',path:'/projects/default-workspace'},{id:'named',title:'自己的项目',path:'/projects/named'}];
+test('session list resolves waiting, running and completed from official and native facts',()=>{
+ const official={blank:false,running:false};
+ assert.equal(sidebarSessionStatus(official), 'completed');
+ assert.equal(sidebarSessionStatus({...official,running:true}), 'running');
+ assert.equal(sidebarSessionStatus(official,{running:true,pendingInteraction:{kind:'question'}}), 'waiting');
+ assert.equal(sidebarSessionStatus(official,undefined,{status:'waiting'}), 'waiting');
+ assert.equal(sidebarSessionStatus(official,undefined,{status:'running'}), 'running');
+ assert.equal(sidebarSessionStatus(official,undefined,{status:'idle',turnId:'turn'}), 'completed');
+ assert.equal(sidebarSessionStatus(undefined,undefined,{status:'idle',turnId:'turn'}), 'completed');
+ assert.equal(sidebarSessionStatus(official,{running:true},{status:'idle',turnId:'previous'}), 'running');
+ assert.equal(sidebarSessionStatus({...official,running:true},{running:false}), 'completed');
+});
+test('fresh, unknown, disconnected and failed sessions are never marked completed',()=>{
+ for(const official of [undefined,{blank:true,running:false},{blank:false}])assert.equal(sidebarSessionStatus(official),undefined);
+ for(const status of ['idle','connecting','disconnected','closed','failed'])assert.equal(sidebarSessionStatus({blank:false,running:false},undefined,{status}),status);
+});
+test('Recent recovery receives official identity and survives unavailable Documents discovery',async()=>{
+ const requests=[],recover=async args=>{requests.push(args);return {workspaceId:'recovered'};};
+ for(const initializeDefault of [async()=>({workspaceId:'official'}),async()=>undefined,async()=>{throw Error('Documents unavailable');}]){
+  assert.equal((await ensureSidebarWorkspace({workspaces:{initializeDefault}},recover)).workspaceId,'recovered');
+ }
+ assert.deepEqual(requests,[{workspaceId:'official'},{workspaceId:undefined},{workspaceId:undefined}]);
+ await assert.rejects(ensureSidebarWorkspace({workspaces:{initializeDefault:async()=>undefined}},async()=>{throw Error('permission denied');}),/permission denied/);
+});
 test('Recent is host default identity, never a merely matching user title',()=>{assert.equal(isRecentWorkspace(projects[0]),true);assert.equal(isRecentWorkspace(projects[1]),false);assert.equal(isRecentWorkspace({path:'/user/deepseek-harness/default-workspace'}),false);assert.deepEqual(projectWorkspaces(projects).map(p=>p.id),['user','named']);});
 test('Recent rows contain default workspace only',()=>{assert.deepEqual(recentRows([{projectId:'auto',id:'a'},{projectId:'user',id:'b'},{cwd:projects[0].path,id:'c'}],projects).map(p=>p.id),['a','c']);});
 test('missing paths never merge unrelated project rows into Recent',()=>{assert.deepEqual(recentRows([{projectId:'auto',id:'a'},{projectId:'user',id:'b'}],[{id:'auto',isDefault:true}]).map(p=>p.id),['a']);});
@@ -32,6 +56,18 @@ test('new chat reads the latest official snapshot instead of waiting for Command
 test('new chat does not reuse a removed fallback default when official list is ready',async()=>{
  const calls=[],host={workspaces:{list:{getSnapshot:()=>({phase:'ready',items:[]})},initializeDefault:async()=>({workspaceId:'initialized'})},uiWorkspace:{startSession:id=>calls.push(id)}};
  await startSidebarSession(host,projects);assert.deepEqual(calls,['initialized']);
+});
+test('new chat repairs Recent before starting, while explicit project creation bypasses recovery',async()=>{
+ const calls=[],host={workspaces:{list:{getSnapshot:()=>({phase:'ready',items:[]})},initializeDefault:async()=>assert.fail('recovery owns initialization')},uiWorkspace:{startSession:id=>calls.push(id)}};
+ let repairs=0;
+ const ensure=async()=>{repairs++;return {workspaceId:'repaired'};};
+ assert.equal(await startSidebarSession(host,projects,undefined,'auto',ensure),'repaired');
+ await startSidebarSession(host,projects,'named','repaired',ensure);
+ assert.equal(repairs,1);assert.deepEqual(calls,['repaired','named']);
+});
+test('failed Recent recovery never starts a session in a stale or unrelated workspace',async()=>{
+ const host={workspaces:{},uiWorkspace:{startSession:()=>assert.fail('must not start')}};
+ await assert.rejects(startSidebarSession(host,projects,undefined,'auto',async()=>{throw Error('directory unavailable');}),/directory unavailable/);
 });
 test('loading and new chat never select rows without an active session',()=>{
  const rows=[{id:'first'},{id:'second'},{id:'native',native:true},{id:'null-owner',ownerSessionId:null,native:true}];

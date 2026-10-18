@@ -8,7 +8,7 @@ for await (const line of lines) {
     try {
       m = JSON.parse(line); if (m.id === undefined) return;
       let result;
-      if (m.method === 'initialize') result = { protocolVersion: m.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'Commander', version: '0.2.0' } };
+      if (m.method === 'initialize') result = { protocolVersion: m.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'DSH-Plus', version: '0.2.0' } };
       else if (m.method === 'ping') result = {};
       else if (m.method === 'tools/list') result = { tools: [{ name: 'commander_delegate', description: 'Delegate to another coding engine in this same project. Provide provider and text, optionally model. Human approval required. Returns child result; if pending, call again with operation=result and sessionId to read it. Do not resubmit.', inputSchema: delegationSchema }] };
       else if (m.method === 'tools/call' && m.params.name === 'commander_delegate') {

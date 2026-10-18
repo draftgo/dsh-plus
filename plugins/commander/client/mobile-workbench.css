@@ -16,7 +16,8 @@
   .cmd-shell-frame[data-plus-shell] > :first-child {
     position: absolute; inset: calc(52px + env(safe-area-inset-top, 0px)) auto 0 0; z-index: 40;
     width: min(304px, 86vw); max-width: 100%;
-    padding-top: env(safe-area-inset-top, 0px); box-sizing: border-box;
+    /* The toolbar offset above already includes the top safe area. */
+    padding-top: 0; box-sizing: border-box;
     background: var(--dsw-specific-sidebar-fill);
     visibility: visible; transform: translateX(0);
     transition: transform 180ms ease, visibility 180ms;
@@ -32,6 +33,7 @@
   .cmd-shell-sidebar [class*="railMark"] { display: none !important; }
   .cmd-shell-sidebar .cmd-session, .cmd-shell-sidebar [class*="panelRow"],
   .cmd-shell-sidebar .cmd-settings { min-height: 44px; }
+  .cmd-shell-sidebar .cmd-settings-row > button { min-height: 44px; }
   .cmd-shell-frame:has(.cmd-projects),
   .cmd-shell-sidebar:has(.cmd-projects),
   .cmd-shell-sidebar:has(.cmd-projects) * { animation: none !important; transition: none !important; }

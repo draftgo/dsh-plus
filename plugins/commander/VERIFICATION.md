@@ -1,4 +1,4 @@
-# Commander 验证记录
+# DSH-Plus 验证记录
 
 日期：2026-10-15。环境：Linux、Node.js 22.22.1。所有真实任务均在临时工作目录执行，未修改主项目或参考仓库。
 
@@ -66,7 +66,7 @@ node --test plugins/commander/test/commands.test.mjs plugins/commander/test/runt
 - Codex、Pi、Claude 的原生模型目录已成功读取。Claude 的模型目录成功不代表其真实模型回复已恢复；此前响应超时的限制仍保留。OpenCode 本机未安装。
 - 20 项自动测试包含共用官方项目、直接会话提交、断开恢复与原生身份保持、归档恢复、委派批准/拒绝、继承目录、跨父会话拒绝读取，以及 loopback capability 缺失/伪造/撤销后的拒绝。
 - `npm --prefix plugins/commander run build:client`、`npm run test:commander`、`npm run check` 已通过；未修改官方子模块源码，未重跑全量上游测试。通过官方前端插件接口加载自有客户端，不需要重编译官方引擎。
-- systemd 改为直接启动官方 profile 进程并使用 `KillMode=mixed`，已验证服务重启正常释放 Commander owner.lock，保留原生历史与句柄。
+- systemd 改为直接启动官方 profile 进程并使用 `KillMode=mixed`，已验证服务重启正常释放 DSH-Plus owner.lock，保留原生历史与句柄。
 
 测试任务没有修改项目文件。测试会话标题包含验证标识，可从 UI 归档。项目共用只代表同目录、同项目注册，不代表上下文合并、文件冲突自动解决、Git worktree 隔离或完整 Paseo 功能对等。
 
@@ -74,8 +74,8 @@ node --test plugins/commander/test/commands.test.mjs plugins/commander/test/runt
 ## 官方聊天界面与命令适配增量（2026-10-15）
 
 - 当前 `npm run test:commander`：43 项通过；包括真实 Cordis/LLM runtime 注册、流投影、人类消息筛选、持久去重、取消/卸载清理、子会话隔离与官方会话绑定。
-- 已撤除 Commander 独立主面板、输入框及消息列表；通过真实 Chromium 验证四工具及模型进入官方模型菜单。新聊天复用官方启动页，空白 Harness 会话不显示侧栏，不启动原生会话。
-- 已在官方 UI 实际验证 Codex 首发与第二轮回复，Commander 会话数量及原生 thread ID 保持不变；无独立 composer，无 pageerror。响应可能超过一分钟，未承诺延迟。
+- 已撤除 DSH-Plus 独立主面板、输入框及消息列表；通过真实 Chromium 验证四工具及模型进入官方模型菜单。新聊天复用官方启动页，空白 Harness 会话不显示侧栏，不启动原生会话。
+- 已在官方 UI 实际验证 Codex 首发与第二轮回复，DSH-Plus 会话数量及原生 thread ID 保持不变；无独立 composer，无 pageerror。响应可能超过一分钟，未承诺延迟。
 - Sidebar 改为项目/最近、单行标题、工具图标和搜索；无浏览器视觉验收，审美由用户验收。
 - 官方 UI `/native` 已真实读取 Codex skills/compact 目录；官方停止按钮已真实中断 Codex native turn，无 pageerror。
 - 四 Provider 新增命令目录与命令派发的协议测试。Codex skills/compact、Pi get_commands/compact、Claude supportedCommands/slash、OpenCode command/summarize 分别适配；并非任意 TUI 命令完整等价。
@@ -87,7 +87,7 @@ node --test plugins/commander/test/commands.test.mjs plugins/commander/test/runt
 
 - 构建插件客户端并重新加载现有 Web 服务；真实 Chromium 验证无账号菜单，设置按钮直接打开官方弹窗，折叠侧栏下仍可打开。
 - 官方插件和自动化入口仍能切换原面板；新聊天、搜索过滤及清空恢复可用。列表 scrollbar-width 为 none，侧栏横向 padding 为 6px；未进行截图审美验收。
-- 使用浏览器响应替换模拟 Commander running → waiting → idle，验证全局图标及 CSS 动画随状态出现、切换和消失；这项测试没有启动真实模型。
+- 使用浏览器响应替换模拟 DSH-Plus running → waiting → idle，验证全局图标及 CSS 动画随状态出现、切换和消失；这项测试没有启动真实模型。
 - 390px 页面宽度无页面横向溢出；未发现 pageerror。原生驱动未改动，未重跑真实模型与全量上游测试。
 
 ## 模型、项目选择与侧栏增量（2026-10-15）
@@ -110,7 +110,7 @@ node --test plugins/commander/test/commands.test.mjs plugins/commander/test/runt
 - 项目/最近使用整行 32px 点击区和 12px 标题，折叠状态保存在浏览器；折叠内容 inert，不进入键盘焦点。两者均折叠时分栏间距 3px。
 - 分栏与单项目箭头仅由展开状态决定，取消通用悬停位移对箭头的干扰。
 - 官方侧栏宽度过渡沿用其状态生命周期并优化曲线；归档列表 110ms 淡出、180ms 淡入，支持系统减少动态设置。
-- 会话操作使用官方 body portal Modal，列表高度不变；包含归档/恢复、删除、复制对话 ID。复制 JSON 明确区分 Harness、Commander、原生工具 ID，另含工具、模型、父会话及项目路径；复制权限失败时提供可选中文本，排除凭据和事件。
+- 会话操作使用官方 body portal Modal，列表高度不变；包含归档/恢复、删除、复制对话 ID。复制 JSON 明确区分 Harness、DSH-Plus、原生工具 ID，另含工具、模型、父会话及项目路径；复制权限失败时提供可选中文本，排除凭据和事件。
 - 模型搜索与工具标题同行，输入移除原生硬描边，保留柔和键盘焦点；返回标题横向 8px、模型按钮横向 10px 内边距。
 
 验证：58/58 插件测试通过，build:client 与 npm run check 通过。服务重新部署且 active。Chromium 实页检查搜索位置、整行点击、折叠高度 0/inert、3px 间距、悬停箭头矩阵不变、归档 out/in 阶段、操作弹窗不改变列表高度、复制剪贴板 JSON 和 Escape 关闭；无 pageerror。模型选择组件由独立 Chromium DOM 检查确认标题与搜索同行、outline none 和两处横向 padding。未进行本次真实模型调用或全量上游测试。官方子模块源码保持 clean。
@@ -128,7 +128,7 @@ node --test plugins/commander/test/commands.test.mjs plugins/commander/test/runt
 
 ## DSH-Plus 内置语音与用量（2026-10-16）
 
-- Voice src/client/test/locale 已并入 voice/，独立包、安装链接及重复 profile bundle 已移除，技术包保持 @dowork/commander。
+- Voice src/client/test/locale 已并入 voice/，独立包、安装链接及重复 profile bundle 已移除，当前技术包为 `dsh-plus`。
 - 客户端构建通过；usage + codex + plugin 8/8 通过。覆盖累计计数差分、去重、未知字段、日期边界、持久化白名单、官方继承/路由防重及跨站拒绝。
 - npm pack --dry-run --ignore-scripts --offline 通过，包含 voice/src、worklet 和内置文档；135 files，约 2.1 MB。
 - 未做视觉验收、真实音频调用与真实工具账户用量对账；本次整合已重启服务。
@@ -141,7 +141,7 @@ node --test plugins/commander/test/commands.test.mjs plugins/commander/test/runt
 - 朗读独立喇叭图标开关，悬停提示状态；录音状态动画、字幕、右侧停止，当前输入栏录音期间隐藏发送。动画表示录音状态，不是实际音量测量。
 - 用量接口已完成真实鉴权 HTTP 200 验证，读取 24 条历史记录和 4 个分组；统计覆盖本应用已有记录与后续接管工具事件，不自动扫描所有第三方工具数据库。速度是首段文本至完成区间的观测速率，含工具和暂停，不是纯模型解码速度。
 
-最终验证：Commander 73/73、内置 Voice 42/42 测试通过，客户端构建与 npm run check 通过。Chromium fixture 验证喇叭图标/悬停提示、录音无旧浮层、录音状态动画、右侧停止、发送隐藏及停止后恢复，无 pageerror。仅假麦克风和转录 fixture，不保存生产语音配置或发聊天。
+最终验证：DSH-Plus 73/73、内置 Voice 42/42 测试通过，客户端构建与 npm run check 通过。Chromium fixture 验证喇叭图标/悬停提示、录音无旧浮层、录音状态动画、右侧停止、发送隐藏及停止后恢复，无 pageerror。仅假麦克风和转录 fixture，不保存生产语音配置或发聊天。
 
 官方模型页运行验证通过：保留原供应商编辑/删除，添加入口仅一个；自定义供应商弹窗展示42项且无原生供应商select，无pageerror。已配置RouterGo不重复提供新增卡片。
 
@@ -156,7 +156,7 @@ node --test plugins/commander/test/commands.test.mjs plugins/commander/test/runt
 
 ### 全机统计与流式语音最终部署（2026-10-16）
 
-- Commander 84/84、内置 Voice 54/54 通过；客户端构建、入口检查与 whitespace 检查通过。补齐 dsh-tools 实际导入的 scope/sandbox 精确版本开发依赖，确保安装 ws 后测试仍可复现。
+- DSH-Plus 84/84、内置 Voice 54/54 通过；客户端构建、入口检查与 whitespace 检查通过。补齐 dsh-tools 实际导入的 scope/sandbox 精确版本开发依赖，确保安装 ws 后测试仍可复现。
 - assistant/attempt 不单独记账，仅贡献同 step 首 Token 时间；原生历史只读导入并去重，缺失指标保持未知。跨预算 JSONL 仅在内存续读，不持久化正文；不完整尾行等待文件变化，避免后台空转。
 - 重新部署 dowork-web.service，端口就绪后真实 Chromium fixture 验证图标式通话启停、10px 左内边距的662px录音条、用量弹窗，以及项目展开/收起移出后背景清除；无 pageerror。麦克风/转录使用 fixture，未向聊天发送测试内容。
 - 已鉴权用量接口返回200，最终扫描 ready：Codex362文件/15353条、Claude60文件/2466条、Pi112文件/8563条，无读取错误；OpenCode未发现日志。查询时段2026-09-01至2026-10-17，去重后含Harness记录26388条；本机日志持续变化，数量非固定基准。
@@ -211,7 +211,7 @@ node --test plugins/commander/test/commands.test.mjs plugins/commander/test/runt
 - 确认插件目录放大：官方 modelCatalog 并发读取 8 个 commander-* provider，每个都重建全目录；provider 列表还逐供应商调用昂贵的 settings.describe()。优化前 session/modelCatalog 连续 13,392/12,551 ms，pickerCatalog 1,499/1,597 ms。修复为每次供应商读取只 describe 一次、并发目录共享在途任务、模型元数据并发解析。无完成结果 TTL，不缓存解析密钥；失败释放任务，返回对象隔离，invalidate 的旧任务不会清除新任务。
 - 项目分组改为优先官方 workspaces.list.items，ready 空目录权威；新建会话实时取官方快照。原生状态空闲降为 10 秒，活动保留 2 秒，后台暂停并在返回时立即刷新；无变化不重复通知 React，单次状态请求有超时。
 - 修复未打开会话时 undefined ownerSessionId 与 undefined activeHarnessId 相等导致全行选中；样式、aria-current、删除后跳转使用同一身份判断，并排除未迁移子代理跟随父行高亮。JSX 回归覆盖加载完成无活动会话、恢复、切换、官方快照先返回及权威空列表。
-- `npm --prefix plugins/commander test` 187/187 通过，客户端构建成功。Commander 客户端启用 minify，本体由 614,014 B 降为 495,370 B（约 19%），gzip 为 148,858 B。未修改官方源码或依赖。
+- `npm --prefix plugins/commander test` 187/187 通过，客户端构建成功。DSH-Plus 客户端启用 minify，本体由 614,014 B 降为 495,370 B（约 19%），gzip 为 148,858 B。未修改官方源码或依赖。
 - 确认无运行回合后更新既有服务；部署后本机认证实测 modelCatalog 为 89/78/82 ms（3 个模型组、0 失败），pickerCatalog 为 72/59/66 ms；项目 state 为 38/14/11 ms，session/list 为 199/148/126 ms。首页与页面声明的合并插件资源均 200，资源内包含本次构建完整字节，服务 active。
 - 冷启动仍有独立资源瓶颈：优化前首批 JS gzip 合计 5,300,208 B，解压约 13.39 MB；最大官方组 gzip 4.20 MB，官方账号设置包含约 3.21 MB 的 base64 图片。gzip 与 rev 版本包 immutable 缓存已正常；站点仍使用 HTTP/1.1，带 hash 的 shell assets 缓存可继续优化。本轮未修改 Nginx、访问白名单、官方资源打包和账号功能。
 - 远端边界：服务器直连域名被现有 IP 白名单拒绝，未将 403 耗时当真实成功加载；上述成功测量通过认证 loopback 完成，不能替代用户设备网络/解析性能。按约定未打开 GUI 或做视觉验收；没有调用推理模型。

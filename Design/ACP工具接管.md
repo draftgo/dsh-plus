@@ -19,7 +19,7 @@
 
 - `initialize`、`session/new`、`session/load`、流式 `session/update`、`session/prompt` 与 `session/cancel`。恢复必须有 `loadSession` 能力，缺失历史或不匹配 ID 显式拒绝，不创建替代会话。恢复时的历史通知不再当成新消息输出。
 - 原生模型表及配置选项发现，选择模型通过 `session/set_model` 或 `session/set_config_option`；未公布模型拒绝猜测。`driver.models()` 读取当前会话，无额外会话。
-- 新建和恢复会话均注入 Commander stdio MCP（`command/args/env`），支持主动跨工具委派。stdio 属于 ACP 基础协议，不依赖 HTTP/SSE 能力声明。工具拒绝 MCP 时明确报错，不静默移除委派或退回 shell。
+- 新建和恢复会话均注入 DSH-Plus stdio MCP（`command/args/env`），支持主动跨工具委派。stdio 属于 ACP 基础协议，不依赖 HTTP/SSE 能力声明。工具拒绝 MCP 时明确报错，不静默移除委派或退回 shell。
 - 获取原生会话 ID 后先通知宿主持久化并等待完成，再执行可失败的模型切换，避免生成不可追踪的孤儿会话。
 - 原生命令 `available_commands_update`、文本/思考/工具调用/计划流；原生上下文通知保留为信息事件，不把上下文占用伪装成计费 token。
 - 权限请求转发 DSH 授权，仅单次明确允许选择 `allow_once`；其他情况、超时、取消和不提供单次允许的工具均拒绝。永不自动选择 `allow_always`。

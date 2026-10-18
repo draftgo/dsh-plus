@@ -39,7 +39,7 @@ for (const provider of (process.env.COMMANDER_NATIVE_PROVIDERS ?? 'codex').split
             if (event.type !== 'approval.requested') return;
             let input;
             try { input = JSON.parse(event.data.details.message); } catch {}
-            const allow = event.data.details.title === 'Commander: bash' && input?.input?.command === 'printf COMMANDER_TOOL_OK';
+            const allow = event.data.details.title === 'DSH-Plus: bash' && input?.input?.command === 'printf COMMANDER_TOOL_OK';
             if (allow) approved = true;
             commander.approve(event.sessionId, event.data.id, { allow });
           });

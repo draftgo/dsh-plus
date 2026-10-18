@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -30,7 +30,8 @@ await pm(['--dir', 'native/system/packages/entry', 'pack', '--pack-destination',
 await pm(['run', 'prepare:runtime'], desktop);
 await pm(['run', 'prepare:packages'], desktop);
 await pm(['run', 'prepare:dsh'], desktop);
-await run([join(root, 'scripts/desktop/plugin-bundle.mjs'), 'stage', '--runtime', join(target, 'dsh')], root);
+await rm(join(target, 'plus-seed'), { recursive: true, force: true });
+await run([join(root, 'scripts/desktop/plugin-bundle.mjs'), 'stage', '--runtime', join(target, 'dsh'), '--output', join(target, 'plus-seed')], root);
 await pm(['exec', 'tsx', join(root, 'scripts/desktop/seal-runtime.mjs'), join(target, 'dsh')], desktop);
 
 const include = (await readFile(join(desktop, 'scripts/installer.nsh'), 'utf8')).replaceAll('\r\n', '\n').replaceAll('${__FILEDIR__}', join(desktop, 'scripts'));
@@ -63,6 +64,6 @@ const bootstrap = `
 `;
 await mkdir(join(root, '.local/desktop'), { recursive: true });
 // Includes in the official text are relative to its original directory.
-await writeFile(join(root, '.local/desktop/installer-plus.nsh'), `!addincludedir "${join(desktop, 'scripts')}"\n${include.replace('!macro customInstall\n', '!macro dshOfficialCustomInstall\n')}${bootstrap}`);
+await writeFile(join(root, '.local/desktop/installer-plus.nsh'), `!addincludedir "${join(desktop, 'scripts')}"\n!define INSTALLER_BUILD_DIR "${join(root, '.local/desktop/brand')}"\n!define INSTALLER_STRINGS_FILE "${join(root, '.local/desktop/brand/strings-plus.nsh')}"\n${include.replace('!macro customInstall\n', '!macro dshOfficialCustomInstall\n')}${bootstrap}`);
 await pm(['exec', 'electron-builder', '--config', join(root, 'scripts/desktop/electron-builder.config.mjs'), '--win', '--x64', '--publish', 'never'], desktop);
 await pm(['exec', 'tsx', join(root, 'scripts/desktop/smoke-windows.mjs')], desktop);

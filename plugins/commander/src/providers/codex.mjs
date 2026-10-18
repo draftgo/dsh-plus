@@ -108,7 +108,7 @@ export class CodexProvider {
           const answer = await host.approval({ kind: 'question', method, nativeRequestId: id, details: p });
           wire.respond(id, { answers: answer.answers ?? {} });
         } else {
-          wire.reject(id, `Commander does not support server request ${method}`);
+          wire.reject(id, `DSH-Plus does not support server request ${method}`);
           host.event('unsupported.request', { method });
         }
       })().catch(error => { try { wire.reject(message.id, error.message); } catch {} host.failure(error); });

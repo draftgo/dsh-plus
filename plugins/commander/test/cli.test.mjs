@@ -1,11 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { mkdtemp, writeFile, rm, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
+
+test('CLI help presents the dsh-plus command without changing the underlying entry point', async () => {
+  const { stdout, stderr } = await promisify(execFile)(process.execPath, [fileURLToPath(new URL('../src/cli.mjs', import.meta.url)), '--help']);
+  assert.match(stdout, /^dsh-plus \[--data-dir PATH\]/);
+  assert.doesNotMatch(stdout, /Commander/);
+  assert.equal(stderr, '');
+});
 
 test('local JSONL control can answer approvals while a wait request is pending', { timeout: 15_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), 'commander-cli-'));

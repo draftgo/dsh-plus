@@ -7,6 +7,7 @@
 - `reference/` 中的 Hermes、Paseo、CC Switch 是参考仓库，不参与产品依赖或构建，不修改它们。
 - `Design/` 存放设计文档，区分已实现能力与待实施方案，引用参考代码时说明版本。
 - 自有插件统一放在根目录 `plugins/`：DSH-Plus（plugins/commander，含编码 Agent 接管和内置 Voice 实时语音）、Link（多端直连）。保持服务契约明确，不将规划目录当作已安装插件。
+- 产品名称为 DSH-Plus；小角是统一 Logo 与吉祥物 IP，规范及正式素材见 `assets/brand/`，PC、移动端与初始化使用同一形象。
 - 根目录使用 `npm run setup/build/dev/start/check` 调用官方脚本；实际依赖由子模块锁定的 Corepack pnpm 管理。
 - `npm run check` 只检查版本、工作区与入口一致性，不代表应用构建或运行成功。按变更运行适当验证，不默认执行整个上游测试套件。
 - 图形应用仅在明确要求时启动。保留许可证与第三方版权声明。

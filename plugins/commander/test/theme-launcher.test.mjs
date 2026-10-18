@@ -63,16 +63,18 @@ for (const [preference, scheme] of [['light', 'light'], ['dark', 'dark'], ['syst
   });
 }
 
-test('wide and rail footer place the theme shortcut immediately before usage', () => {
+test('wide and rail footer keep theme, update and usage shortcuts in order', () => {
   const source = readFileSync(new URL('../client/index.jsx', import.meta.url), 'utf8');
   const code = transformSync(source + '\nexport { SettingsLauncher };', { loader: 'jsx', format: 'cjs' }).code;
   const UsageLauncher = () => null;
+  const UpdateLauncher = () => null;
   const Stub = () => null;
   const module = { exports: {} };
   runInNewContext(code, { module, exports: module.exports, require: id => {
     if (id === 'react') return { ...React, useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot() };
     if (id === './theme-launcher.jsx') return { ThemeLauncher };
     if (id === './usage.jsx') return { UsageLauncher, UsageDialog: Stub };
+    if (id === './updates.jsx') return { UpdateLauncher };
     if (id === './iconsax.jsx') return { UIIcon: Stub };
     if (id === '@deepseek-ai/dsh-client-ui-primitives') return { Tooltip: Stub };
     return {};
@@ -83,7 +85,8 @@ test('wide and rail footer place the theme shortcut immediately before usage', (
     const children = React.Children.toArray(tree.props.children);
     const position = children.findIndex(child => child.type === ThemeLauncher);
     assert(position >= 0);
-    assert.equal(children[position + 1].type, UsageLauncher);
+    assert.equal(children[position + 1].type, UpdateLauncher);
+    assert.equal(children[position + 2].type, UsageLauncher);
     assert.equal(children[position].props.theme, theme);
   }
   const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));

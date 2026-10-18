@@ -20,7 +20,7 @@
 - `npm run test:voice`：原独立语音测试 40/40 通过。覆盖配置持久化/密钥脱敏、模拟 ASR/TTS、流取消、同设备租约、采集重采样、实际消费 ACK、分段转写顺序、断句过滤、合成预取、Agent 增量去重、插话和启动/挂断竞态、审批保护。
 - `npm --prefix plugins/commander run build:client`：通过。
 - `npm run check`：官方 0.2.1-alpha.3，提交 571902028a75c64c1d767f4ae5fd099485f0ddf0，子模块干净；此命令不是功能验收。
-- 当前 Web profile 已添加并安装 `@dowork/commander`，服务正常；认证后的 `/api/voice` 返回默认全关闭、模型未配置的安全配置；匿名访问仍受官方鉴权保护。
+- 当前 Web profile 已添加并安装 `dsh-plus`，服务正常；认证后的 `/api/voice` 返回默认全关闭、模型未配置的安全配置；匿名访问仍受官方鉴权保护。
 - Chromium 交互检查：设置 → 语音页显示三个开关与模型配置，未捕获页面错误。
 - Chromium 假麦克风 + 浏览器拦截的转录 fixture：输入栏麦克风启动、停止、AudioWorklet 加载及转录文字回填原生草稿成功，无页面错误。fixture 仅在该浏览器上下文生效，未保存测试供应商配置、未发真实模型请求、未创建聊天消息。
 

@@ -1,7 +1,7 @@
 {
-  "name": "@dowork/commander",
+  "name": "dsh-plus",
   "displayName": "DSH-Plus",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "DSH-Plus native coding agents, shared projects, voice and enhanced Harness UI",
@@ -15,7 +15,8 @@
     "./locale/*.json": "./locale/*.json"
   },
   "bin": {
-    "commander": "src/cli.mjs"
+    "commander": "src/cli.mjs",
+    "dsh-plus": "src/cli.mjs"
   },
   "files": [
     "src",
@@ -88,10 +89,12 @@
     }
   },
   "dependencies": {
+    "@deepseek-ai/dsh-atomic-write": "0.2.1-alpha.3",
     "@deepseek-ai/dsh-llm": "0.2.1-alpha.3",
     "json5": "2.2.3",
     "jsonc-parser": "3.3.1",
     "smol-toml": "1.9.0",
+    "tar": "7.5.22",
     "ws": "8.19.0",
     "yaml": "2.9.0"
   }

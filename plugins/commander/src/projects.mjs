@@ -12,7 +12,7 @@ export function githubRepository(value) {
   return { owner, name, url: `https://github.com/${owner}/${name}.git` };
 }
 
-function profileDirectory(ctx) {
+export function profileDirectory(ctx) {
   const pathService = ctx.get?.('path');
   if (typeof pathService?.baseDir === 'string' && isAbsolute(pathService.baseDir)) return pathService.baseDir;
   // Official app-boot sets baseUrl to the active configuration/profile folder.

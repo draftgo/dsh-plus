@@ -48,7 +48,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dsh-plus-windows-x64
-          path: artifacts/windows/*.exe
+          path: |
+            artifacts/windows/*.exe
+            artifacts/windows/*.blockmap
+            artifacts/windows/latest.yml
           if-no-files-found: error
           retention-days: 14
       - name: Retain diagnostics

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { Commander } from '../src/runtime.mjs';
 import { mountWeb } from '../src/web.mjs';
 
@@ -223,4 +224,17 @@ test('owner Web exposes directory browsing and rejects invalid clone repositorie
   assert.equal(directory.path, dir);
   assert.ok(Array.isArray(directory.entries));
   await assert.rejects(api({ action: 'clone', url: 'http://github.com/owner/repo' }), /HTTPS GitHub/);
+});
+
+test('owner Web repairs Recent through the registered API and persists its identity', async t => {
+  const { ctx, dir, route, api } = await setup(t);
+  ctx.baseUrl = pathToFileURL(`${dir}/`).href;
+  const response = await route.fetch(new Request('http://localhost/api/commander', {
+    method: 'POST', body: JSON.stringify({ action: 'ensureRecent' }),
+  }));
+  assert.equal(response.status, 200);
+  const workspace = await response.json();
+  assert.equal(workspace.path, join(dir, 'workspaces', 'default-workspace'));
+  assert.equal((await api({ action: 'ensureRecent' })).workspaceId, workspace.workspaceId);
+  assert.deepEqual(JSON.parse(await readFile(join(dir, 'recent-workspace.json'), 'utf8')), { id: workspace.workspaceId, path: workspace.path });
 });

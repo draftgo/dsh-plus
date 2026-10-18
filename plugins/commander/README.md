@@ -4,7 +4,7 @@
 
 ### 加载与侧栏
 
-项目和分组优先使用官方 Workspace 实时快照，不等待额外的 Commander 状态请求。原生会话状态在页面可见时轮询：活动状态每 2 秒、空闲每 10 秒；后台标签暂停，返回时立即刷新，相同数据不重复通知界面。模型目录的并发工具请求共享一次在途构建，每次供应商目录只投影一次设置，完成后不保留目录结果缓存，后续配置和凭据变化仍能及时读取。
+项目和分组优先使用官方 Workspace 实时快照，不等待额外的 DSH-Plus 状态请求。原生会话状态在页面可见时轮询：活动状态每 2 秒、空闲每 10 秒；后台标签暂停，返回时立即刷新，相同数据不重复通知界面。模型目录的并发工具请求共享一次在途构建，每次供应商目录只投影一次设置，完成后不保留目录结果缓存，后续配置和凭据变化仍能及时读取。
 
 会话选中态要求明确的活动会话 ID，未打开对话时不高亮任何行；未迁移的子代理不会跟随父会话误选中。前端构建启用压缩；首次远端访问仍需下载官方首屏资源，本机接口耗时不代表用户网络上的完整加载时间，测量记录见 [验证记录](VERIFICATION.md)。
 
@@ -20,11 +20,11 @@
 
 侧栏设置行、归档按钮左侧的用量图标打开统计弹窗。支持今天、3/7/15/30 天和本地日期自定义区间，按工具、模型汇总真实 Token、缓存读取与命中率、输出速度。概览中的“数据图表”展示所选日期内全部记录的 Token 用量和记录数量，合并为双轴图表（Token 柱形使用左轴，记录数量折线使用右轴），当天按小时、多天按天，超过 90 天按月、超过 10 年按年汇总；按浏览器时区分桶，不受详细记录分页影响。详细使用记录每页 50 条；汇总覆盖整个时间范围。
 
-采集范围包括本插件已管理的原生事件、官方 Harness 历史，以及当前系统用户可读的 Codex、Claude Code、Pi、OpenCode 本机历史。扫描按文件数、字节数和单行大小设限，保留增量游标；扫描覆盖状态与异常保留在统计接口，弹窗不再显示数据来源板块；刷新可再次扫描，不代表已覆盖所有历史。旧 Commander 事件有长度上限，原先被丢弃或未上报的用量无法补造；启用后元数据单独写入 Commander 数据目录的 usage.json，不保存明文输入、回复或密钥。删除对话不会删除已归集的匿名计数。此记录是本地使用观察，不作为供应商账单。
+采集范围包括本插件已管理的原生事件、官方 Harness 历史，以及当前系统用户可读的 Codex、Claude Code、Pi、OpenCode 本机历史。扫描按文件数、字节数和单行大小设限，保留增量游标；扫描覆盖状态与异常保留在统计接口，弹窗不再显示数据来源板块；刷新可再次扫描，不代表已覆盖所有历史。旧 DSH-Plus 事件有长度上限，原先被丢弃或未上报的用量无法补造；启用后元数据单独写入 DSH-Plus 数据目录的 usage.json，不保存明文输入、回复或密钥。删除对话不会删除已归集的匿名计数。此记录是本地使用观察，不作为供应商账单。
 
-未提供的计数显示“未提供”，不计为零；缓存容量和命中率不按模型名称猜测。Codex 逐次用量以原生累计计数差分去重，首次观测保留原生 last 请求口径；上下文使用原生最后请求输入计数，不把输出计入上下文。原生目录提供真实 contextWindow 时才向官方 Harness 透传容量，默认或未知模型不猜容量。只有可识别的单次原生请求才投影官方 usage；多请求原生回合保留账单记录，不伪造单次上下文或速度。官方速度从持久化流首个有效增量到步骤完成时间计算；生成区间包含工具和暂停，不冒充纯模型解码速度，缺少有效时间时为空。官方历史通过 sessionQuery 读取已持久化的 assistant/message / assistant/attempt，排除继承前缀和 Commander 路由以防重复。统计损坏或写入失败不阻断聊天。
+未提供的计数显示“未提供”，不计为零；缓存容量和命中率不按模型名称猜测。Codex 逐次用量以原生累计计数差分去重，首次观测保留原生 last 请求口径；上下文使用原生最后请求输入计数，不把输出计入上下文。原生目录提供真实 contextWindow 时才向官方 Harness 透传容量，默认或未知模型不猜容量。只有可识别的单次原生请求才投影官方 usage；多请求原生回合保留账单记录，不伪造单次上下文或速度。官方速度从持久化流首个有效增量到步骤完成时间计算；生成区间包含工具和暂停，不冒充纯模型解码速度，缺少有效时间时为空。官方历史通过 sessionQuery 读取已持久化的 assistant/message / assistant/attempt，排除继承前缀和 DSH-Plus 路由以防重复。统计损坏或写入失败不阻断聊天。
 
-插件产品名为 **DSH-Plus**；`@dowork/commander`、`plugins/commander/` 与 `commander_*` 保持为兼容标识，现有配置及会话无需迁移。
+插件产品名为 **DSH-Plus**，完整包名为 `dsh-plus`；目录 `plugins/commander/`、配置 ID `commander` 与工具名 `commander_*` 保持不变。已有源码 profile 需将依赖与 `dsh.profile.bundles` 中的 `@dowork/commander` 改为 `dsh-plus` 后重新安装依赖；Desktop 打包初始化会迁移旧包引用，并保留已有启用或禁用状态。
 
 状态：已实现 Harness Web 项目侧栏、原生工具/模型选择、直接聊天、审批与跨引擎委派；保留 Harness 工具调用与本地 CLI 入口。尚未达到完整 Paseo 功能对等。
 
@@ -49,7 +49,7 @@ npm run commander
 请检查这个项目，先不要修改文件
 /stop
 /list
-/resume 之前的Commander会话ID
+/resume 之前的DSH-Plus会话ID
 ```
 
 普通文字发送到当前会话；`/use ID` 切换查看；`/approve 请求ID yes|no` 回答权限；`/answer 请求ID JSON` 回答问题；`/events [游标]`、`/history`、`/discover` 查看事件、原生历史和可发现的原生会话；`/close` 释放进程并保留会话；`/archive` 归档。
@@ -70,7 +70,7 @@ dsh plugin --profile desktop add ./plugins/commander
 
 ### Web 项目与直接聊天
 
-访问现有 Harness Web，点击侧栏 **新聊天** 或项目旁 **＋**，在官方模型菜单选择 Codex、Claude Code、Pi、OpenCode 及其模型，直接在官方输入框发送。不再使用 Commander 独立聊天页或“选择伙伴”卡片。项目复用 Harness Workspace 注册表；多个工具共享目录，原生上下文各自独立，不自动建立 worktree。
+访问现有 Harness Web，点击侧栏 **新聊天** 或项目旁 **＋**，在官方模型菜单选择 Codex、Claude Code、Pi、OpenCode 及其模型，直接在官方输入框发送。不再使用 DSH-Plus 独立聊天页或“选择伙伴”卡片。项目复用 Harness Workspace 注册表；多个工具共享目录，原生上下文各自独立，不自动建立 worktree。
 
 侧栏使用单行标题、工具图标、项目与最近列表；运行或等待审批时显示小状态点。空白 Harness 会话不出现在侧栏，首次发送才建立原生会话。消息、Markdown、流式回复、停止和人工审批由官方 UI 承载；当前 adapter 仅支持文字，原生工具详细事件尚未投影到官方轨迹。
 
@@ -99,7 +99,7 @@ Web 接口继承官方认证、Origin 检查和 owner 权限；初次登录使�
 
 传参 `{provider, text, model?}` 创建子任务，返回子会话身份、文本与状态；55 秒内未结束时返回 pending，可用 `{operation: "result", sessionId}` 读取同一子会话，不能重复创建任务代替重试。仅能读取自己的直接子会话。默认最多三层嵌套、每个父会话十二个未归档子会话，可由插件配置 `maxDelegationDepth` / `maxDelegationChildren` 调整。父会话结束不自动终止独立子任务；需要停止时显式进入子会话中断。
 
-原生桥只监听动态 loopback 端口，使用每连接随机凭证并在断开时撤销；这些内部凭证不发送给网页。CLI 单独运行时不启用该桥。当前原生内部委派仅用于直接创建的 Commander Web 会话；Harness 对话的 `commander_*` 继续按原对话隔离。
+原生桥只监听动态 loopback 端口，使用每连接随机凭证并在断开时撤销；这些内部凭证不发送给网页。CLI 单独运行时不启用该桥。当前原生内部委派仅用于直接创建的 DSH-Plus Web 会话；Harness 对话的 `commander_*` 继续按原对话隔离。
 
 构建前端：`npm --prefix plugins/commander run build:client`；更新代码后重启实际 Harness 服务并刷新页面。详细验收见 [VERIFICATION.md](VERIFICATION.md)。
 
@@ -121,7 +121,7 @@ Harness 的 Bundle 行也可设置 `config.providers`、`config.dataDir` 等同�
 
 ```json
 {"id":1,"method":"create","params":{"provider":"codex","cwd":"/绝对路径"}}
-{"id":2,"method":"send","params":{"id":"返回的Commander会话ID","text":"检查项目","requestId":"稳定且唯一的输入ID"}}
+{"id":2,"method":"send","params":{"id":"返回的DSH-Plus会话ID","text":"检查项目","requestId":"稳定且唯一的输入ID"}}
 ```
 
 支持 providers、doctor、list、create、connect、send、steer、interrupt、approve、events、history、discover、wait、close、archive。导入既有原生会话时向 create 传 `nativeId`，先停止其原始写入进程；当前无法可靠发现其他程序持有的活跃 CLI，也不会强行抢占。
@@ -188,7 +188,7 @@ OpenCode **仅适配 v1**，主动拒绝 v2；需要安装现有 CLI，插件不
 
 | 场景 | 目标行为 |
 | --- | --- |
-| Commander 启动的会话 | 管理整个运行生命周期、持续输入输出、工具审批与中断 |
+| DSH-Plus 启动的会话 | 管理整个运行生命周期、持续输入输出、工具审批与中断 |
 | 已存在的持久会话 | 经支持的原生接口发现并恢复，先检查是否仍有其他写入者 |
 | 其他终端中正在运行的 CLI | 只有原生提供 attach/control 接口时才连接；否则要求先停止原进程再恢复会话 |
 | 普通终端进程或屏幕内容 | 不把读取终端输出当成获得原生会话和审批控制权 |
@@ -208,7 +208,7 @@ OpenCode **仅适配 v1**，主动拒绝 v2；需要安装现有 CLI，插件不
 
 ## 状态和控制权
 
-Harness 仍持有宿主会话与权限体系；Commander 持有外部执行资源及原生句柄映射，原生引擎持有自己的会话历史。不建立第二套 Harness 会话或推理循环，也不将外部审批冒充为 Harness 工具审批。
+Harness 仍持有宿主会话与权限体系；DSH-Plus 持有外部执行资源及原生句柄映射，原生引擎持有自己的会话历史。不建立第二套 Harness 会话或推理循环，也不将外部审批冒充为 Harness 工具审批。
 
 服务通过 Provider 注册与事件订阅组合会话 create/discover/connect、submit/steer/interrupt、approve、close。操作能力必须由 Provider 声明；只读客户端不获得写入和审批权限。
 
@@ -226,10 +226,11 @@ Harness 仍持有宿主会话与权限体系；Commander 持有外部执行资�
 ## 项目选择、模型菜单与对话整理
 
 - 添加项目支持服务器文件夹浏览及名称搜索，无需输入绝对路径；本地官方 Desktop 另可调用系统选择文件夹窗口。
+- “最近”工作区在启动及新建聊天时自动检查、补建。保留官方首次初始化的目录与身份；删除登记或目录后按持久记录恢复，无记录时使用当前 Profile 的 `workspaces/default-workspace`，不会借用其他项目。
 - GitHub HTTPS 地址可克隆到当前 Profile 的 `workspaces/<repo>` 并自动注册为各工具共用项目。同名目录拒绝覆盖，私有仓库使用宿主既有 Git 凭据。
 - 同一模型弹窗内先选工具、再选模型，选择与持久化复用官方 Harness；初始页隐藏探索品牌，输入框与消息仍使用官方 UI。
 - 收起侧栏以同轴图标导航；导航图标使用本地 Iconsax Linear/Bold 及选中动效，来源和 MIT 许可位于 `client/assets/iconsax/`。
-- 对话菜单提供归档、恢复及删除。删除只移除列表和 Commander 管理记录，不删除原生工具历史、服务器日志或项目文件。运行中的会话需要先停止。
+- 对话菜单提供归档、恢复及删除。删除只移除列表和 DSH-Plus 管理记录，不删除原生工具历史、服务器日志或项目文件。运行中的会话需要先停止。
 ## 本地字体
 
 界面及正文默认使用用户提供的阿里妈妈方圆体 VF，字体位于 assets/fonts/。

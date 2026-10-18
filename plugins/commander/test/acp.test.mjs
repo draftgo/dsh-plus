@@ -82,7 +82,7 @@ test('all ACP tools receive Commander stdio MCP on both new and resumed sessions
 });
 test('rejected MCP fails explicitly without silently retrying without delegation', async t => {
   for (const session of [{}, { nativeId: 'acp-native-fixture' }]) {
-    await assert.rejects(connect(t, { delegation, session, env: { ACP_REJECT_MCP: '1' } }), /Commander delegation MCP failed: This agent does not support MCP servers/);
+    await assert.rejects(connect(t, { delegation, session, env: { ACP_REJECT_MCP: '1' } }), /DSH-Plus delegation MCP failed: This agent does not support MCP servers/);
   }
   await assert.rejects(connect(t, { delegation: { ...delegation, token: '' } }), /delegation requires/);
 });

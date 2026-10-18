@@ -12,7 +12,7 @@ plugins/commander/          DSH-Plus 安装单元，复用官方 Desktop / Web
 plugins/link/
   src/pairing/             短时配对、设备令牌哈希、持久化
   src/transport/           HTTPS 监听、证书和请求校验
-  src/session/             官方会话与旧 Commander 直接会话适配
+  src/session/             官方会话与旧 DSH-Plus 直接会话适配
   client/                  桌面设置、共享移动 React 界面及原生桥接
   mobile/android/          Kotlin App、OkHttp、Keystore、扫码
   config/                  用户自建公网反代示例
@@ -28,9 +28,9 @@ reference/                 只读参考，不参与依赖、打包或上传
 
 ## 连接与权限
 
-2026-10-17 移动端第三轮：连接后默认显示跨项目「最近」，按真实更新时间分组，支持项目/会话搜索和运行中筛选。左侧抽屉统一最近、新会话和连接管理入口，取消底部导航和首页项目卡选择；仅新建会话选择工作位置与模型，默认推断最近有效项目。最近列表、聊天和抽屉共用现有 Iconsax 与 Commander 中性配色，支持整页深浅主题、焦点约束和 Escape；聊天保留各会话草稿与发送幂等重试，阅读历史时不强制滚到底部。
+2026-10-17 移动端第三轮：连接后默认显示跨项目「最近」，按真实更新时间分组，支持项目/会话搜索和运行中筛选。左侧抽屉统一最近、新会话和连接管理入口，取消底部导航和首页项目卡选择；仅新建会话选择工作位置与模型，默认推断最近有效项目。最近列表、聊天和抽屉共用现有 Iconsax 与 DSH-Plus 中性配色，支持整页深浅主题、焦点约束和 Escape；聊天保留各会话草稿与发送幂等重试，阅读历史时不强制滚到底部。
 
-2026-10-17 移动端第四轮：真实连接后转入同源 `/link/workbench/`，复用同一 Harness 网页入口、会话、输入/斜杠命令、模型、权限预设、内置插件、Harness 工具及 Voice 设置，不再复制移动端会话/配置界面。网页侧使用官方组件和共享状态，Commander 仅添加可逆的窄屏工具栏、侧栏抽屉和设置视口适配；Android 配对页成功后移除 JS bridge 并加载受限来源的工作台 WebView，精确校验 TLS/SPKI 和麦克风权限。
+2026-10-17 移动端第四轮：真实连接后转入同源 `/link/workbench/`，复用同一 Harness 网页入口、会话、输入/斜杠命令、模型、权限预设、内置插件、Harness 工具及 Voice 设置，不再复制移动端会话/配置界面。网页侧使用官方组件和共享状态，DSH-Plus 仅添加可逆的窄屏工具栏、侧栏抽屉和设置视口适配；Android 配对页成功后移除 JS bridge 并加载受限来源的工作台 WebView，精确校验 TLS/SPKI 和麦克风权限。
 
 工作台通过配对设备 Bearer 令牌签发 `/link/workbench/` 限定的 Secure、HttpOnly、SameSite=Strict Cookie；API 及官方 Gateway 流沿用设备独立 Peer，不能访问 owner 设备管理接口。撤销设备会同步清除 Cookie、取消请求/流并释放 Peer。设备因而拥有完整可信个人工作台权限，而非窄范围会话只读接口。
 
@@ -57,18 +57,18 @@ reference/                 只读参考，不参与依赖、打包或上传
 - 2026-10-17 移动第三轮：Link 42/42 测试通过，正式 Plus/Web 与独立预览构建通过。浏览器交互验证跨项目最近、搜索、运行中筛选、抽屉焦点与 Escape、会话草稿保留、工作位置/模型选择、新建发送、发送后排序、深浅色、网络恢复和明确的演示配对授权。320/390/768 像素无横向溢出，演示页面无真实 API 请求、无页面错误。
 - 正式 `/link/` 使用独立临时浏览器设备完成真实配对、桌面允许、默认最近展示 94 条会话与连接管理入口；测试设备已撤销。此验证不调用外部模型、不替代实体手机与相机验收；APK 仍待前端验收后打包。
 
-- 2026-10-17 第二轮：Link 36 项、相关 Commander 集成 8 项通过；build:plus、独立 build:preview、根 check 和限定范围差异检查通过。
+- 2026-10-17 第二轮：Link 36 项、相关 DSH-Plus 集成 8 项通过；build:plus、独立 build:preview、根 check 和限定范围差异检查通过。
 - 无公网 LAN：独立网络命名空间、无默认路由与 DNS 的手机/主机双端，完成真实 TLS / SPKI 校验、错误 pin 拒绝、配对确认、RPC 和撤销后 401；脚本为 plugins/link/test/lan-offline.mjs。这不替代实体手机与路由器验收。
 - 云端真实反代完成浏览器配对、桌面批准、读取 2 个项目与 69 个模型、撤销后 401；使用标准证书校验，测试设备已清除。联调通过本机域名解析访问反代，尚未证明用户手机蜂窝网络链路。
 - /mobile 浏览器交互通过扫码演示、桌面允许、进入工作台、发送、失败恢复和深浅色；320 / 390 / 768 像素无横向溢出，无真实 API 请求或 JavaScript 页面错误。此入口是界面预览，不保存真实配对。
 - 桌面远程连接弹窗经浏览器检查：320 / 390 / 1280 像素无横向溢出，备用码 overflow 为 hidden，没有可见的重复 Bold 图标层，Escape 可关闭。
 - Android 本轮离线 compileDebugKotlin、配对解析 25 项 JVM 断言及错误映射 10 项断言通过；新增云端 HTTPS 二维码支持，保留局域网 SPKI 校验。既有 APK 尚不含本轮改动，待预览验收后重新打包。
 
-- 2026-10-17 新手连接流程调整：Link 23 项测试、相关 Commander 集成 7 项测试、`npm run build:plus` 和根 `npm run check` 通过；生成的 Link 服务另经隔离临时监听验证启用、地址过滤、默认配对 SPKI 和停用。未重启用户实例，未新增手机或 GUI 实测。
+- 2026-10-17 新手连接流程调整：Link 23 项测试、相关 DSH-Plus 集成 7 项测试、`npm run build:plus` 和根 `npm run check` 通过；生成的 Link 服务另经隔离临时监听验证启用、地址过滤、默认配对 SPKI 和停用。未重启用户实例，未新增手机或 GUI 实测。
 
-- Commander 原有自动测试 169 项通过。
+- DSH-Plus 原有自动测试 169 项通过。
 - Link 自动测试 16 项通过，覆盖真实 TLS、配对过期与撤销、监听管理、会话归属、输入幂等、审批/问题和原生直接会话；具体数量以当次 `npm run test:link` 输出为准。
-- Commander 前端、Link Web 与打包通过；插件包包含 Link 服务、Web 资源及第三方许可。
+- DSH-Plus 前端、Link Web 与打包通过；插件包包含 Link 服务、Web 资源及第三方许可。
 - 隔离真实 Harness 联调通过 owner 认证、工作区注册、TLS CA / QR SPKI、配对确认、模型/会话创建与幂等、消息、实时文本、最终历史、真实官方审批拒绝及设备撤销。
 - 联调模型仅请求本机临时 SSE mock，没有调用外部模型，也没有改动现有服务。测试审批拒绝后不启动原生 CLI。
 - Android `assembleDebug` 真实构建通过，生成验收用 debug APK。
@@ -85,4 +85,4 @@ reference/                 只读参考，不参与依赖、打包或上传
 
 ## 参考与许可
 
-Paseo 参考提交 `d57096a4568cd2db106f35a0c5011627de53a646`；Remote 参考提交 `4a2862d168ee3f99ce226c282a4899bf7427c06e`。仅用于职责与恢复流程参考，Link 未复制 Remote 源码。第三方图标、字体、官方 UI 与构建内联依赖的声明保留于 Commander NOTICE 和 `lib/LINK-THIRD-PARTY-LICENSES.txt`，字体不属于插件 MIT 许可。
+Paseo 参考提交 `d57096a4568cd2db106f35a0c5011627de53a646`；Remote 参考提交 `4a2862d168ee3f99ce226c282a4899bf7427c06e`。仅用于职责与恢复流程参考，Link 未复制 Remote 源码。第三方图标、字体、官方 UI 与构建内联依赖的声明保留于 DSH-Plus NOTICE 和 `lib/LINK-THIRD-PARTY-LICENSES.txt`，字体不属于插件 MIT 许可。

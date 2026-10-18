@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { smokePreparedRuntime } from '../../deepseek-harness/apps/desktop/scripts/smoke-prepared-runtime.ts';
 import { DesktopHostProcess } from '../../deepseek-harness/apps/desktop/src/host-process.ts';
+import { getInstallState } from '../../plugins/commander/shared/plugin-install.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const app = join(root, 'artifacts/windows/win-unpacked');
@@ -21,8 +22,12 @@ try {
     child.once('error', reject); child.once('exit', code => code === 0 ? resolve() : reject(new Error(`Packaged Plus enrollment failed: ${code}`)));
   });
   const manifest = JSON.parse(await readFile(join(temporary, 'profiles/desktop/package.json')));
-  if (!manifest.dsh?.profile?.bundles?.includes('@dowork/dsh-plus-desktop')) throw new Error('Installed profile did not activate Plus');
   const profile = join(temporary, 'profiles/desktop');
+  const state = await getInstallState(profile);
+  if (!state.managed || !state.enabled || !manifest.dependencies?.[state.bundleName]?.startsWith('link:')) throw new Error('Installed profile did not activate managed Plus');
+  await readFile(join(profile, 'node_modules', state.bundleName, 'package.json'));
+  const inventory = JSON.parse(await readFile(join(resources, 'app.asar.unpacked/dsh/desktop-runtime.json')));
+  if (inventory.sharedPackages.some(item => item.name === 'dsh-plus' || item.name === '@dowork/dsh-plus-desktop')) throw new Error('Plugin is still locked inside the sealed engine');
   await writeFile(join(profile, 'cordis.patch.yml'), `- id: webserver\n  config:\n    host: 127.0.0.1\n    port: 0\n- id: commander\n  config:\n    dataDir: ${JSON.stringify(join(temporary, 'commander'))}\n`);
   host = new DesktopHostProcess(executable, join(resources, 'app.asar', 'dsh'), profile, undefined, environment, undefined, join(resources, 'runtime/primary-runtime'), { pnpm: join(resources, 'runtime/primary-runtime/dependencies/pnpm/bin/pnpm.mjs'), nodeBin: join(resources, 'runtime/bin') });
   let deadline;

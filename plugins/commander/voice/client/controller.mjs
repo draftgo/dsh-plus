@@ -9,7 +9,9 @@ async function json(action,args={}) {
 }
 function observable(initial) { let value=initial;const listeners=new Set();return {getSnapshot:()=>value,subscribe:fn=>{listeners.add(fn);return ()=>listeners.delete(fn);},patch:patch=>{value={...value,...patch};for(const fn of listeners)fn();}}; }
 export function createVoiceController(ctx,deps={}) {
-  const request=deps.fetch||globalThis.fetch,requestJson=deps.json||json,environment=deps.window||globalThis.window;
+  // RealtimeRecognizer calls request as an instance method; Window.fetch needs
+  // its own receiver rather than the recognizer instance.
+  const request=deps.fetch||globalThis.fetch.bind(globalThis),requestJson=deps.json||json,environment=deps.window||globalThis.window;
   const makeCapture=deps.createCapture||(options=>new Capture(options)),makePlayer=deps.createPlayer||(options=>new PCMPlayer(options)),makeQueue=deps.createQueue||(options=>new SpeechQueue(options)),makeChunker=deps.createChunker||(()=>new SpeakableChunker());
   const wait=deps.wait||(ms=>new Promise(resolve=>setTimeout(resolve,ms)));
   const schedule=deps.setInterval||globalThis.setInterval,unschedule=deps.clearInterval||globalThis.clearInterval;

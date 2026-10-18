@@ -1,6 +1,10 @@
 # DSH-Plus
 
+<img src="assets/brand/dsh-plus-logo.svg" width="80" height="80" alt="DSH-Plus 吉祥物小角">
+
 为官方 DeepSeek Harness 增加编码 Agent 接管、Voice 语音与 Link 多端直连。保留官方引擎，不修改其源码。
+
+小角是 DSH-Plus 的统一 Logo 与吉祥物 IP，品牌素材见 [assets/brand](assets/brand/README.md)。
 
 ## 安装插件
 
@@ -69,7 +73,7 @@ npm run build:android
 
 ## 功能与验证边界
 
-- 官方与 Commander 会话共用主机状态：项目、模型、新建、历史、流式文本、发送、停止、审批与问题。
+- 官方与 DSH-Plus 会话共用主机状态：项目、模型、新建、历史、流式文本、发送、停止、审批与问题。
 - 设备需桌面确认，授权可撤销；可信设备能操作所有已注册工作区，首版没有逐项目访客权限。
 - Android 一次保存一台主机，支持清除重配；任务留在主机运行，前台短轮询恢复状态。
 - 不含桌面投屏、远程终端/文件编辑、公共中继、穿透、iOS 原生包或后台保活承诺。
@@ -79,3 +83,5 @@ npm run build:android
 ## 许可
 
 项目遵循 [MIT](LICENSE)。官方引擎及第三方资产遵循各自许可证；图标、字体与内联依赖说明见 [NOTICE](plugins/commander/NOTICE)。字体不属于本项目 MIT 许可。`reference/` 的仓库不是产品依赖，Link 未复制 Remote 源码。
+
+更新方式、首次 Windows 迁移与签名发布流程见 [更新与发布](Design/更新与发布.md)。

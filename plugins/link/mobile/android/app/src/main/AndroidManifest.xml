@@ -5,8 +5,9 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <application
         android:theme="@style/Theme.DshPlus"
-        android:label="DSH Plus"
-        android:icon="@drawable/ic_dsh_plus"
+        android:label="DSH-Plus"
+        android:icon="@mipmap/ic_dsh_plus"
+        android:roundIcon="@mipmap/ic_dsh_plus"
         android:allowBackup="false"
         android:supportsRtl="true"
         android:usesCleartextTraffic="false">

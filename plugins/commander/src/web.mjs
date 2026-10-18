@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { discoverModels } from './models.mjs';
 import { DelegationBridge } from './delegation.mjs';
 import { projectActions } from './projects.mjs';
+import { recentWorkspaceActions } from './recent-workspace.mjs';
 import { mountFonts } from './fonts.mjs';
 
 const webOwner = id => `commander-web:${id}`;
@@ -22,6 +23,7 @@ export async function mountWeb(ctx, commander, config = {}) {
   const models = new Map();
   const starts = new Map();
   const projects = projectActions(ctx);
+  const recent = recentWorkspaceActions(ctx, commander.store.directory);
   const dismissedPath = join(commander.store.directory, 'dismissed-harness.json');
   let deletedHarnessIds = [];
   try {
@@ -91,6 +93,7 @@ export async function mountWeb(ctx, commander, config = {}) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Expected an object');
     const { action } = input;
     if (action === 'state') return state();
+    if (action === 'ensureRecent') return recent.ensure(input);
     if (action === 'binding') {
       const ownerSessionId = text(input.harnessSessionId, 'harnessSessionId', 200);
       const session = commander.list().find(item => !item.archived && (!item.parentId || item.harnessAdopted) && item.ownerSessionId === ownerSessionId);
@@ -214,7 +217,7 @@ export async function mountWeb(ctx, commander, config = {}) {
     if (action === 'close') return commander.disconnect(s.id);
     if (action === 'history') return { history: await commander.history(s.id) };
     if (action === 'approve') { commander.approve(s.id, text(input.approvalId, 'approvalId', 200), input.answer); return commander.snapshot(s.id); }
-    throw new Error(`Unknown Commander action: ${action}`);
+    throw new Error(`Unknown DSH-Plus action: ${action}`);
   };
   await mountFonts(ctx);
   ctx.effect(() => ctx.connection.fetch.register({

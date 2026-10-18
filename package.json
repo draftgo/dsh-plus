@@ -1,6 +1,6 @@
 {
   "name": "dsh-plus",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "DSH-Plus plugin, voice and paired remote clients for the official DeepSeek Harness",
@@ -36,6 +36,8 @@
     "test:link": "npm --prefix plugins/link test",
     "build:plus": "npm --prefix plugins/commander run build:client",
     "build:android": "node scripts/build-link-android.mjs",
-    "package:plus:win": "node scripts/desktop/package-windows.mjs"
+    "package:plus:win": "node scripts/desktop/package-windows.mjs",
+    "dsh-plus": "node plugins/commander/src/cli.mjs",
+    "package:plus:plugin": "node scripts/desktop/package-plugin-update.mjs"
   }
 }

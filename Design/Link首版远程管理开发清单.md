@@ -29,10 +29,10 @@ App 的价值在于原生连接与设备信任，不能只把一个网页套进 
 
 ## 复用原则和边界
 
-1. **一个执行主机、一个权威状态**。手机操作原会话，不另起一份 Commander/Harness，也不通过同步数据库伪造同一会话。
+1. **一个执行主机、一个权威状态**。手机操作原会话，不另起一份 DSH-Plus/Harness，也不通过同步数据库伪造同一会话。
 2. **官方会话走官方连接契约**。复用官方 Connection/Host/Client 能力与 DSH-Plus 适配器；`plugins/commander/src/web.mjs` 的直接会话写操作有 `commander-web:` 所有权限制，不能移除这个限制来支持手机。
 3. **Link 只负责连接**。管理入口放在 DSH-Plus，服务实现放 `plugins/link/`，移动端放 `plugins/link/mobile/`。现已随 DSH-Plus 构建并打入插件，不要求单独安装 Link。
-4. **原生端复用业务契约**。通过适配层调用官方会话操作与事件，不复制 Agent 执行引擎。自有 Commander 能力仍走已有权限和归属规则。
+4. **原生端复用业务契约**。通过适配层调用官方会话操作与事件，不复制 Agent 执行引擎。自有 DSH-Plus 能力仍走已有权限和归属规则。
 5. **设备授权说清楚**。首版优先做可信个人设备授权；若官方接口只支持当前用户权限，界面明确说明等同主机用户访问，不伪称已经支持按项目细分授权。不增加万能 shell 接口。
 
 官方 Desktop 已有共享 Web Host，但网络暴露、浏览器身份与原生端 peer 不能直接视为已兼容。首个开发步骤必须验证能否仅通过自有插件/配置复用同一个运行时，禁止修改官方子模块源码或启动另一份 Harness 规避问题。
@@ -108,7 +108,7 @@ iOS 原生安装包与局域网接入、语音/推送、附件与文件编辑、
 - Paseo：`d57096a4568cd2db106f35a0c5011627de53a646`。参考 [架构](../reference/paseo/docs/architecture.md)、[时间线恢复](../reference/paseo/docs/timeline-sync.md)，重点是主机权威状态、客户端生命周期和恢复策略；不引入整个服务端。
 - Remote：`4a2862d168ee3f99ce226c282a4899bf7427c06e`。参考 [移动端说明](../reference/ds-harness-remote/apps/android/README.md)、[运行时](../reference/ds-harness-remote/apps/android/src/services/remote-runtime.ts)、[连接实现](../reference/ds-harness-remote/apps/android/src/services/connection.ts)。其移动端依赖 Remote 账号/设备目录、Noise 和自适应 P2P/TURN/Relay，不是更改 URL 即可复用。
 - 可选择复用聊天组件、导航、SecureStore、独立连接 Runtime 与恢复思路；替换登录、设备目录、传输及业务适配，去掉首版无关功能。根仓库声明 MIT，复制代码保留版权/许可并核对第三方依赖；移动目录无独立许可文件，不能忽略这一点。
-- 当前自有能力：[Commander Web](../plugins/commander/src/web.mjs)、[原生会话适配](../plugins/commander/src/harness-adapter.mjs)、[项目与委派边界](./Commander项目与原生委派.md)。
+- 当前自有能力：[DSH-Plus Web](../plugins/commander/src/web.mjs)、[原生会话适配](../plugins/commander/src/harness-adapter.mjs)、[项目与委派边界](./Commander项目与原生委派.md)。
 - 官方承载能力：[Desktop](../deepseek-harness/apps/desktop/README.md)、[Web Server](../deepseek-harness/packages/host/webserver/README.md)、[连接认证契约](../deepseek-harness/docs/subsystems/web-server.md)。
 
 `reference/` 只读参考，不参与产品构建；所需代码经许可核对后放入自有模块，不直接建立 reference workspace 依赖。

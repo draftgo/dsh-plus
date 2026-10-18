@@ -2,7 +2,7 @@
 
 协议配置、使用方式与验证范围见 [STREAMING.md](STREAMING.md)。默认采用 OpenAI 兼容接口；供应商特有协议需要明确选择。
 
-DSH-Plus 内置语音模块，目录 `plugins/commander/voice/`，技术包名 `@dowork/commander`。不修改官方引擎，复用官方输入框、消息流、模型选择、Agent 与人工审批。
+DSH-Plus 内置语音模块，目录 `plugins/commander/voice/`，技术包名 `dsh-plus`。不修改官方引擎，复用官方输入框、消息流、模型选择、Agent 与人工审批。
 
 ## 使用
 
@@ -32,7 +32,7 @@ npm run build:voice
 npm run test:voice
 ```
 
-向官方 profile 的 `package.json` 添加 `dependencies: {"@dowork/commander":"link:/absolute/path/plugins/commander"}`，并在 `dsh.profile.bundles` 数组加入 `@dowork/commander`，在该 profile 安装依赖后由官方 `dsh web` / Desktop 启动。当前服务器 Web profile 已接入；其他 profile 需自行安装。不改上游工作区、源码或锁文件。
+向官方 profile 的 `package.json` 添加 `dependencies: {"dsh-plus":"link:/absolute/path/plugins/commander"}`，并在 `dsh.profile.bundles` 数组加入 `dsh-plus`，在该 profile 安装依赖后由官方 `dsh web` / Desktop 启动。当前服务器 Web profile 已接入；其他 profile 需自行安装。不改上游工作区、源码或锁文件。
 
 ## 机制与边界
 

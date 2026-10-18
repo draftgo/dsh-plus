@@ -1,0 +1,84 @@
+name: DSH-Plus plugin update
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a new signed plugin release (requires a unique plugin version)
+        type: boolean
+        required: true
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: dsh-plus-plugin-release
+  cancel-in-progress: false
+jobs:
+  package:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      CI: 'true'
+      DSH_TELEMETRY_DISABLED: '1'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Prepare package manager
+        run: |
+          npm install --global corepack@0.34.0
+          corepack enable
+      - name: Install locked dependencies
+        run: |
+          npm run setup
+          npm ci --prefix plugins/link
+          npm ci --prefix plugins/commander
+      - name: Verify update feed and build plugins
+        run: |
+          node --test plugins/commander/test/update-feed.test.mjs
+          npm run build:plus
+      - name: Create plugin archive
+        run: node scripts/desktop/package-plugin-update.mjs --out artifacts/plugins
+      - name: Sign update manifest
+        env:
+          DSH_PLUS_UPDATE_PRIVATE_KEY: ${{ secrets.DSH_PLUS_UPDATE_PRIVATE_KEY }}
+        run: |
+          app_feed_args=()
+          if curl -fL --max-time 30 --max-filesize 262144 'https://github.com/draftgo/dsh-plus/releases/download/app-updates/latest.yml' -o app-feed.json; then
+            app_feed_args=(--app-feed app-feed.json)
+          fi
+          node scripts/desktop/create-update-manifest.mjs --out artifacts/plugins "${app_feed_args[@]}"
+      - name: Retain signed update package
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-plus-plugin-update
+          path: artifacts/plugins/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish unique plugin version
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          version=$(node -p "JSON.parse(require('fs').readFileSync('plugins/commander/package.json','utf8')).version")
+          tag="plugin-v${version}"
+          tags=$(git ls-remote --tags origin "refs/tags/${tag}")
+          if [ -n "$tags" ]; then
+            echo "Version ${version} already exists; increment the plugin version before publishing."
+            exit 1
+          fi
+          gh release create "$tag" artifacts/plugins/* --target "$GITHUB_SHA" --title "DSH-Plus plugin ${version}" --notes "Signed plugin update for the compatible Harness engine. Existing tasks and settings are preserved." --latest=false
+          if ! gh release view plugin-updates --json tagName > /dev/null 2>&1; then
+            gh release create plugin-updates --target "$GITHUB_SHA" --title "DSH-Plus plugin update channel" --notes "Signed metadata for the current compatible plugin release." --latest=false
+          fi
+          gh release upload plugin-updates artifacts/plugins/dsh-plus-update.json artifacts/plugins/dsh-plus-update.json.sig --clobber

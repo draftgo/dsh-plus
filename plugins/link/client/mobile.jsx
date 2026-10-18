@@ -6,6 +6,7 @@ import { Button, ErrorText, StatusDot, useLinkStyle } from './app.jsx';
 import { Interaction } from './interaction.jsx';
 import { defaultProjectId, recentSessions } from './mobile-state.mjs';
 import { MobileEmpty, MobileSidebar, SessionList, SessionSearch } from './mobile-navigation.jsx';
+import { BrandLogo } from './brand.jsx';
 
 function useMobileStyle() {
   useLinkStyle();
@@ -215,5 +216,5 @@ export function LinkMobileApp({ runtime = nativeRuntime, theme: controlledTheme,
     {sidebarOpen && <MobileSidebar state={state} screen={screen} selectedId={session?.id} onChoose={choose} onNavigate={navigate} onNew={openNew} onClose={closeSidebar} connectionLabel={connectionLabel} connectionState={connectionState} theme={theme} onTheme={() => setTheme(value => value === 'light' ? 'dark' : 'light')} disabled={busy || !!sendPending} />}
   </main>;
 }
-function Brand() { return <div className="link-mobile-brand"><span className="link-mark"><UIIcon name="link" size={19} /></span><span>DSH <span className="link-mobile-brand-sub">Link</span></span></div>; }
+function Brand() { return <div className="link-mobile-brand"><BrandLogo size={28} decorative /><span>DSH-Plus</span></div>; }
 function connectionError(message, lan) { if (/[\u3400-\u9fff]/.test(message) || !/failed to connect|timeout|timed out|unreachable/i.test(message)) return message; return lan ? '暂时无法连接电脑。请确认手机和电脑在同一 Wi-Fi，电脑已开启 Link；检查防火墙后可重新连接。' : '暂时无法连接工作台。请确认 HTTPS 地址可从手机访问，并检查服务状态、域名证书与网络转发后重试。'; }

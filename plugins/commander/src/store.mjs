@@ -20,14 +20,14 @@ export class Store {
         if (error.code !== 'EEXIST') throw error;
         let owner;
         try { owner = JSON.parse(await readFile(this.lockPath, 'utf8')); }
-        catch { throw new Error('Commander owner lock is unreadable; inspect it before removing'); }
-        if (owner.host !== hostname()) throw new Error('Commander data directory is owned by another host');
-        try { process.kill(owner.pid, 0); throw new Error('Commander data directory is already in use'); }
+        catch { throw new Error('DSH-Plus owner lock is unreadable; inspect it before removing'); }
+        if (owner.host !== hostname()) throw new Error('DSH-Plus data directory is owned by another host');
+        try { process.kill(owner.pid, 0); throw new Error('DSH-Plus data directory is already in use'); }
         catch (check) { if (check.code !== 'ESRCH') throw check; }
-        throw new Error('Stale Commander owner.lock: verify the recorded process has exited, then remove the lock explicitly');
+        throw new Error('Stale DSH-Plus owner.lock: verify the recorded process has exited, then remove the lock explicitly');
       }
     }
-    if (!this.lock) throw new Error('Could not acquire Commander owner lock');
+    if (!this.lock) throw new Error('Could not acquire DSH-Plus owner lock');
     try {
       return JSON.parse(await readFile(join(this.directory, 'sessions.json'), 'utf8'));
     } catch (error) {

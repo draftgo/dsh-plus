@@ -111,7 +111,7 @@ export class ACPProvider {
       try {
         result = await wire.request(session.nativeId ? 'session/load' : 'session/new', { ...(session.nativeId ? { sessionId: session.nativeId } : {}), cwd: session.cwd, mcpServers });
       } catch (error) {
-        if (delegation) throw new Error('ACP session with Commander delegation MCP failed: ' + error.message, { cause: error });
+        if (delegation) throw new Error('ACP session with DSH-Plus delegation MCP failed: ' + error.message, { cause: error });
         throw error;
       }
       if (!session.nativeId && (typeof result?.sessionId !== 'string' || !result.sessionId)) throw new Error('ACP agent did not return a durable session id');

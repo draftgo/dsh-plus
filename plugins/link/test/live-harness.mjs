@@ -16,9 +16,9 @@ const profileDependencies = resolve(process.env.LINK_HARNESS_NODE_MODULES || joi
 const tsxImport = join(root, 'deepseek-harness/node_modules/tsx/dist/esm/index.mjs');
 for (const [path, mode, hint] of [
   [nodeBinary, constants.X_OK, 'Set LINK_TEST_NODE to a Node.js 24 executable'],
-  [join(profileDependencies, '@dowork/commander/package.json'), constants.R_OK, 'Set LINK_HARNESS_NODE_MODULES to prepared profile node_modules containing @dowork/commander'],
+  [join(profileDependencies, 'dsh-plus/package.json'), constants.R_OK, 'Set LINK_HARNESS_NODE_MODULES to prepared profile node_modules containing dsh-plus'],
   [tsxImport, constants.R_OK, 'Install the official Harness workspace dependencies (tsx is required)'],
-  [join(root, 'plugins/commander/lib/link.mjs'), constants.R_OK, 'Build the Commander and Link bundle first'],
+  [join(root, 'plugins/commander/lib/link.mjs'), constants.R_OK, 'Build the DSH-Plus and Link bundle first'],
 ]) {
   try { await access(path, mode); }
   catch { console.error(`Link live smoke prerequisite missing: ${path}. ${hint}.`); process.exit(1); }
@@ -52,7 +52,7 @@ try {
   await new Promise(resolve => modelServer.listen(0, '127.0.0.1', resolve));
   const modelUrl = `http://127.0.0.1:${modelServer.address().port}/v1`;
   await mkdir(profile, { recursive: true }); await mkdir(workspace);
-  await writeFile(join(profile, 'package.json'), JSON.stringify({ name: 'dsh-link-live-profile', private: true, dependencies: { '@dowork/commander': `link:${root}/plugins/commander` }, dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@dowork/commander'] } } }));
+  await writeFile(join(profile, 'package.json'), JSON.stringify({ name: 'dsh-link-live-profile', private: true, dependencies: { 'dsh-plus': `link:${root}/plugins/commander` }, dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-plus'] } } }));
   await writeFile(join(profile, 'cordis.yml'), '[]\n');
   await writeFile(join(profile, 'cordis.patch.yml'), [
     '- id: commander', `  config:`, `    dataDir: ${JSON.stringify(join(directory, 'commander'))}`,
@@ -93,8 +93,9 @@ try {
   const expectedPin = new URL(pair.uri).searchParams.get('pin');
   const ca = JSON.parse(await readFile(join(directory, 'commander/link/tls.json'), 'utf8')).cert;
   assert.equal(createHash('sha256').update(new X509Certificate(ca).publicKey.export({ type: 'spki', format: 'der' })).digest('base64'), expectedPin);
-  const remote = async (path, input, token) => new Promise((resolve, reject) => {
-    const req = httpsRequest(`https://127.0.0.1:${enabled.port}${path}`, { method: 'POST', ca, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) } }, res => {
+  const remote = async (path, input, token, headers = {}, onHeaders) => new Promise((resolve, reject) => {
+    const req = httpsRequest(`https://127.0.0.1:${enabled.port}${path}`, { method: 'POST', ca, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers } }, res => {
+      onHeaders?.(res.headers);
       let bytes = ''; res.on('data', chunk => { bytes += chunk; }); res.on('end', () => { try { const value = JSON.parse(bytes); if (res.statusCode >= 400) reject(new Error(`Remote ${input.action || path}: ${JSON.stringify(value)}`)); else resolve(value); } catch (e) { reject(e); } });
     });
     req.on('error', reject); req.end(JSON.stringify(input));
@@ -105,6 +106,18 @@ try {
   const authorized = await remote('/link/api/pair/status', pending);
   assert.equal(authorized.status, 'approved');
   const rpc = input => remote('/link/api/rpc', input, authorized.token);
+  let workbenchCookie;
+  await remote('/link/api/workbench', {}, authorized.token, {}, headers => { workbenchCookie = headers['set-cookie']?.[0]?.split(';')[0]; });
+  assert.ok(workbenchCookie, 'paired device receives its own workbench cookie');
+  const updates = input => remote('/link/workbench/api/commander/updates', input, undefined, { cookie: workbenchCookie });
+  const updateStatus = await updates({ action: 'status' });
+  assert.equal(updateStatus.current.plugin, JSON.parse(await readFile(join(root, 'plugins/commander/package.json'))).version);
+  assert.equal(updateStatus.installation, 'server');
+  assert.equal(updateStatus.managed, false, 'source profiles never falsely offer Windows self-updating');
+  const configuredUpdates = await updates({ action: 'configure', source: 'github' });
+  assert.equal(configuredUpdates.config.source, 'github', 'phone saves update preference on the connected host');
+  await updates({ action: 'configure', source: 'mirror' });
+  await assert.rejects(updates({ action: 'install' }), /服务器部署管理/);
   const state = await rpc({ action: 'state' });
   assert.ok(state.projects.length, 'Official runtime registered workspace');
   assert.ok(Array.isArray(state.models));
@@ -146,8 +159,9 @@ try {
   assert.ok(afterApproval.messages.some(message => message.role === 'tool' && message.text.includes('not approved')), 'denied launch produced an official tool result without launching a native CLI');
   await admin({ action: 'revoke', id: authorized.deviceId });
   await assert.rejects(rpc({ action: 'state' }), /授权/);
+  await assert.rejects(updates({ action: 'status' }), /授权/);
   await admin({ action: 'configure', enabled: false });
-  console.log(JSON.stringify({ passed: ['real Harness boot', 'owner admin', 'TLS trusted CA and SPKI binding', 'pair confirm', 'remote state/models', 'official create idempotency', 'official history snapshot', 'mock model send and live/final assistant history', 'official approval deny and tool result', 'device revoke'], models: state.models.length, sessions: state.sessions.length }));
+  console.log(JSON.stringify({ passed: ['real Harness boot', 'owner admin', 'TLS trusted CA and SPKI binding', 'pair confirm', 'remote state/models', 'paired workbench plugin update API and host preferences', 'official create idempotency', 'official history snapshot', 'mock model send and live/final assistant history', 'official approval deny and tool result', 'device revoke'], models: state.models.length, sessions: state.sessions.length }));
 } catch (error) {
   failed = true;
   console.error(safe(error.message));

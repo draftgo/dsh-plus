@@ -1,6 +1,6 @@
 # 原生工具配置服务
 
-实现参考 reference/cc-switch@51ac86f 的配置格式，不参与参考项目构建。支持 Claude Code、Claude Desktop、Codex、Gemini、Grok Build、OpenCode、OpenClaw、Hermes、Pi、MiniMax Code。Claude Code、Codex、Pi、OpenCode、Gemini、Hermes、Grok Build、MiniMax Code 同时具备 Commander 会话驱动。配置支持不等于会话驱动支持。
+实现参考 reference/cc-switch@51ac86f 的配置格式，不参与参考项目构建。支持 Claude Code、Claude Desktop、Codex、Gemini、Grok Build、OpenCode、OpenClaw、Hermes、Pi、MiniMax Code。Claude Code、Codex、Pi、OpenCode、Gemini、Hermes、Grok Build、MiniMax Code 同时具备 DSH-Plus 会话驱动。配置支持不等于会话驱动支持。
 
 createToolProfiles({directory, providers, home?, env?, platform?}) 同步创建服务；providers 传入现有 createModelProviders(ctx)，复用官方供应商和凭据，不复制供应商 CRUD。下列方法均异步：
 

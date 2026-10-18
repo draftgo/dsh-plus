@@ -34,7 +34,7 @@ internal fun connectionFailureMessage(error: Throwable, hostUrl: String, pinned:
         hostname.startsWith("fd") && hostname.contains(':') || hostname.endsWith(".local") ||
         pinned && hostname.isNotEmpty() && !hostname.contains('.') && !hostname.contains(':')
     val networkHelp = if (localAddress) {
-        "请确认运行 DSH Plus 的电脑已开启 Link，手机与它连接同一局域网（无需公网）；检查路由器的 AP 隔离或访客网络设置，并允许 Link 端口通过电脑防火墙。"
+        "请确认运行 DSH-Plus 的电脑已开启 Link，手机与它连接同一局域网（无需公网）；检查路由器的 AP 隔离或访客网络设置，并允许 Link 端口通过电脑防火墙。"
     } else {
         "请确认手机可以访问该 HTTPS 地址，远程主机的 Link 服务已开启；请由管理员检查 HTTPS 反向代理、端口和服务器防火墙。也可重新扫描主机的新配对二维码。"
     }

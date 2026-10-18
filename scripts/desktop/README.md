@@ -8,6 +8,8 @@
 - `plugin-bundle.mjs`：以 npm 发布白名单复制插件与依赖，复用官方服务，首次安装启用组合 bundle。
 - `seal-runtime.mjs`：注入后通过官方 writer 重建完整文件哈希与共享包清单。
 - `electron-builder.config.mjs`：扩展官方配置，独立 appId / 产品名，预览关闭自动更新与强制升级策略；不引用官方更新服务。
+- `prepare-brand.mjs`：从 `assets/brand/` 生成小角 Windows、托盘、安装/卸载图标，官方源码保持不变。
+- `renderer/`：打包时通过官方文件映射替换初始化页面，只展示小角和工作台准备状态，通过已有 `dshWelcome.skip()` 进入工作台；失败可重试，不写入虚假凭据或登录状态。模型凭据在工作台内配置。
 - `smoke-windows.mjs`：验证打包资源、官方 Host 启动、离线配对 profile 初始化与认证 Link 管理接口。
 - `test-install-windows.ps1`：CI 静默安装并检查用户 profile 已启用 Plus。
 
