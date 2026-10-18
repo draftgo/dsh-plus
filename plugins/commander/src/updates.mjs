@@ -9,8 +9,20 @@ import { readLimited } from '../voice/src/media.mjs';
 const json = async path => JSON.parse(await readFile(path, 'utf8'));
 const conflict = message => Object.assign(new Error(message), { status: 409 });
 
+/** Read the immutable application's version, never the independently updated plugin version. */
+export async function desktopApplicationVersion(executable = process.execPath, readJson = json) {
+  try {
+    const app = await readJson(join(dirname(executable), 'resources', 'app.asar', 'package.json'));
+    if (app.name === 'dsh-plus-desktop' && typeof app.version === 'string') {
+      isNewerVersion(app.version, app.version);
+      return app.version;
+    }
+  } catch {}
+  return undefined;
+}
+
 /** Each immutable release is staged before one profile manifest switch; loaded code stays intact. */
-export async function createUpdates({ directory, profile, runtime, version, engineVersion, isBusy = () => false,
+export async function createUpdates({ directory, profile, runtime, version, engineVersion, appVersion, isBusy = () => false,
   installation = 'desktop', fetcher = globalThis.fetch, publicKey, install = { prepareRelease, activateRelease, getInstallState, rollbackRelease } }) {
   const configFile = join(directory, 'updates.json');
   const lifetime = new AbortController();
@@ -22,13 +34,14 @@ export async function createUpdates({ directory, profile, runtime, version, engi
     const state = await installed(), busy = !!(await isBusy());
     const restartRequired = !!state.managed && state.version !== version;
     const compatible = !!release && !!engineVersion && isEngineCompatible(engineVersion, release.engine);
+    const currentApp = appVersion ?? state.appVersion;
     return {
-      phase: restartRequired ? 'ready' : phase, installation, notice: phase === 'unpublished' ? '更新通道尚未就绪' : '', config, current: { plugin: version, engine: engineVersion, app: state.appVersion },
+      phase: restartRequired ? 'ready' : phase, installation, notice: phase === 'unpublished' ? '更新通道尚未就绪' : '', config, current: { plugin: version, engine: engineVersion, app: currentApp },
       managed: !!state.managed, busy, restartRequired, checkedAt, error,
       canInstall: !!state.managed && !busy && !restartRequired && !task && compatible && isNewerVersion(release.plugin.version, version),
       canRollback: !!state.managed && !!state.previous && !restartRequired && !task,
       release: release ? { ...release, plugin: { ...release.plugin, available: isNewerVersion(release.plugin.version, version), compatible, reason: compatible ? undefined : '请先升级应用，以匹配此插件需要的引擎。' },
-        ...(release.app ? { app: { ...release.app, available: !state.appVersion || isNewerVersion(release.app.version, state.appVersion), url: resolveUpdateUrl(release.app.url, config) } } : {}) } : null,
+        ...(release.app ? { app: { ...release.app, available: !currentApp || isNewerVersion(release.app.version, currentApp), url: resolveUpdateUrl(release.app.url, config) } } : {}) } : null,
     };
   };
   const start = work => {
@@ -119,7 +132,8 @@ export async function mountUpdates(ctx, commander, options = {}) {
   const pkg = await json(new URL('../package.json', import.meta.url));
   let engineVersion;
   try { engineVersion = (await json(join(runtime, 'node_modules/@deepseek-ai/dsh-app-boot/package.json'))).version; } catch {}
-  const service = await createUpdates({ directory: commander.store.directory, profile: context?.dir, runtime, installation: context?.name === 'desktop' ? 'desktop' : 'server', version: pkg.version, engineVersion,
+  const appVersion = context?.name === 'desktop' ? await desktopApplicationVersion() : undefined;
+  const service = await createUpdates({ directory: commander.store.directory, profile: context?.dir, runtime, installation: context?.name === 'desktop' ? 'desktop' : 'server', version: pkg.version, engineVersion, appVersion,
     isBusy: () => commander.list().some(session => ['running', 'connecting', 'waiting'].includes(session.status)) ||
       (ctx.get('agents')?.list?.() ?? []).some(agent => agent.status === 'running'), ...options });
   const fetch = async request => {

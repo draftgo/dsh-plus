@@ -4,7 +4,7 @@ import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
-import { createUpdates, mountUpdates } from '../src/updates.mjs';
+import { createUpdates, mountUpdates, desktopApplicationVersion } from '../src/updates.mjs';
 
 async function fixture(t, options = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-update-test-'));
@@ -29,7 +29,7 @@ async function fixture(t, options = {}) {
     if (options.beforeDownload) await options.beforeDownload(() => { busy = true; });
     return new Response(options.corrupt ? 'wrong bytes' : artifact);
   };
-  const service = await createUpdates({ directory, profile: directory, runtime: directory, version: '0.1.2', engineVersion: '1.2.3', publicKey: publicKey.export({ type: 'spki', format: 'pem' }), fetcher, install, installation: options.installation || 'desktop', isBusy: () => busy });
+  const service = await createUpdates({ directory, profile: directory, runtime: directory, version: '0.1.2', engineVersion: '1.2.3', appVersion: options.appVersion, publicKey: publicKey.export({ type: 'spki', format: 'pem' }), fetcher, install, installation: options.installation || 'desktop', isBusy: () => busy });
   t.after(() => service.close());
   return { service, directory, state, setBusy: value => { busy = value; }, activated: () => activated, downloads: () => downloads };
 }
@@ -45,6 +45,21 @@ test('signed check, verified install, persistence and restart state form one com
   const status = await f.service.status();
   assert.equal(f.activated(), 1); assert.equal(status.restartRequired, true); assert.equal(status.current.plugin, '0.1.2'); assert.equal(status.current.app, '0.1.2');
   await assert.rejects(f.service.dispatch({ action: 'install' }), /重启/);
+});
+
+test('actual app metadata takes priority over a marker containing the plugin version', async t => {
+  const f = await fixture(t, { appVersion: '0.1.3', state: { appVersion: '0.1.4' } });
+  assert.equal((await f.service.status()).current.app, '0.1.3');
+  assert.equal((await f.service.status()).current.plugin, '0.1.2');
+});
+
+test('desktop application version uses only the installed DSH-Plus application metadata', async () => {
+  let requested;
+  assert.equal(await desktopApplicationVersion('/installed/DSH-Plus.exe', async file => { requested = file; return { name: 'dsh-plus-desktop', version: '0.1.3' }; }), '0.1.3');
+  assert.equal(requested, join('/installed', 'resources', 'app.asar', 'package.json'));
+  assert.equal(await desktopApplicationVersion('/installed/node', async () => ({ name: 'node', version: '22.0.0' })), undefined);
+  assert.equal(await desktopApplicationVersion('/installed/DSH-Plus.exe', async () => ({ name: 'dsh-plus-desktop', version: 'invalid' })), undefined);
+  assert.equal(await desktopApplicationVersion('/installed/DSH-Plus.exe', async () => { throw Error('missing'); }), undefined);
 });
 
 test('unmanaged installations and running tasks cannot mutate plugin versions', async t => {
