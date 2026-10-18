@@ -5,8 +5,49 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { TOOL_IDS, nativeConfigFiles, parseConfig, renderConfig, toolCapabilities } from '../src/tool-config.mjs';
 import { createToolProfiles } from '../src/tool-profiles.mjs';
+import { quickSettingsFor, validateQuickSettings } from '../shared/tool-quick-settings.mjs';
 const secret = 'native-secret-do-not-return', providers = { async resolve(id) { if (id !== 'official') throw Error('missing'); return { baseURL: 'https://example.test/v1', apiKey: secret }; } };
 async function setup() { const dir = await mkdtemp(join(tmpdir(), 'tool-config-')); return { dir, service: createToolProfiles({ directory: join(dir, 'state'), providers, home: dir, env: {}, platform: 'linux' }) }; }
+async function applyNative(service, input) { const preview = await service.preview(input); return service.apply({ ...input, revision: preview.revision, checksums: Object.fromEntries(preview.files.map(file => [file.path, file.checksum])), confirmNativeWrite: true }); }
+
+test('native writes require deliberate confirmation and complete preview even through the service', async t => {
+  const { dir, service } = await setup(); t.after(() => rm(dir, { recursive: true, force: true }));
+  await service.save({ tool: 'codex', providerId: 'official', model: 'm' });
+  const preview = await service.preview({ tool: 'codex' });
+  const input = { tool: 'codex', revision: preview.revision, checksums: Object.fromEntries(preview.files.map(file => [file.path, file.checksum])) };
+  await assert.rejects(service.apply(input), /显式确认/);
+  await assert.rejects(service.apply({ tool: 'codex', confirmNativeWrite: true }), /预览/);
+  await assert.rejects(service.apply({ ...input, confirmNativeWrite: true, checksums: {} }), /已变更/);
+  const applied = await service.apply({ ...input, confirmNativeWrite: true });
+  await assert.rejects(service.restore({ backupId: applied.backupId }), /显式确认/);
+});
+
+test('quick settings stay plugin-local until explicit export and never store credentials', async t => {
+  const { dir, service } = await setup(); t.after(() => rm(dir, { recursive: true, force: true }));
+  const spec = nativeConfigFiles('claude', { home: dir, env: {} })[0];
+  await mkdir(join(spec.path, '..'), { recursive: true });
+  const original = '{"env":{"ANTHROPIC_AUTH_TOKEN":"user-token"},"future":true}';
+  await writeFile(spec.path, original);
+  const quickSettings = { agentTeams: true, agentWindow: 'in-process', thinking: false, effort: 'high' };
+  const saved = await service.save({ tool: 'claude', providerId: 'official', model: 'm', quickSettings });
+  await service.setDefault({ tool: 'claude', revision: saved.revision });
+  assert.equal(await readFile(spec.path, 'utf8'), original);
+  const list = await service.list();
+  assert.equal(list.native.find(tool => tool.tool === 'claude').hasConfiguration, true);
+  assert.deepEqual(list.defaults[0].quickSettings, quickSettings);
+  assert.doesNotMatch(JSON.stringify(list), /user-token|native-secret/);
+  const applied = await applyNative(service, { tool: 'claude' });
+  const config = parseConfig(await readFile(spec.path, 'utf8'), 'jsonc');
+  assert.equal(config.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS, '1');
+  assert.equal(config.teammateMode, 'in-process'); assert.equal(config.alwaysThinkingEnabled, false);
+  await service.restore({ backupId: applied.backupId, confirmNativeWrite: true });
+  assert.equal(await readFile(spec.path, 'utf8'), original);
+  assert.throws(() => validateQuickSettings('codex', { apiKey: 'secret' }), /不支持/);
+  assert.throws(() => validateQuickSettings('codex', { multiAgent: 'true' }), /无效/);
+  assert.throws(() => validateQuickSettings('codex', { agentThreads: 0 }), /无效/);
+  assert.throws(() => validateQuickSettings('codex', { contextWindow: 4096, compactLimit: 8192 }), /不能超过/);
+  assert.equal(quickSettingsFor('claude').some(field => field.key === 'agentWindow'), true);
+});
 
 test('all ten reference tools receive native formats and keep unknown configuration', async () => {
   const { dir, service } = await setup();
@@ -15,7 +56,7 @@ test('all ten reference tools receive native formats and keep unknown configurat
       for (const spec of nativeConfigFiles(tool, { home: dir, env: {}, platform: 'linux' })) { await mkdir(join(spec.path, '..'), { recursive: true }); await writeFile(spec.path, spec.format === 'yaml' ? '# retained\nfuture: keep\n' : spec.format === 'toml' ? 'future = "keep"\n' : spec.format === 'env' ? '# retained\nFUTURE=keep\n' : '{\n // retained\n "future": "keep",\n}\n'); }
       await service.save({ tool, providerId: 'official', model: 'test-model' });
       const preview = await service.preview({ tool }); assert.ok(preview.files.length); assert.doesNotMatch(JSON.stringify(preview), /native-secret|inferenceGatewayApiKey/);
-      const result = await service.apply({ tool, revision: preview.revision, checksums: Object.fromEntries(preview.files.map(x => [x.path, x.checksum])) }); assert.ok(result.backupId);
+      const result = await service.apply({ tool, confirmNativeWrite: true, revision: preview.revision, checksums: Object.fromEntries(preview.files.map(x => [x.path, x.checksum])) }); assert.ok(result.backupId);
       for (const spec of nativeConfigFiles(tool, { home: dir, env: {}, platform: 'linux' })) {
         const raw = await readFile(spec.path, 'utf8'); assert.match(raw, /keep/); assert.equal((await stat(spec.path)).mode & 0o777, 0o600);
         if (spec.format !== 'env') assert.equal(parseConfig(raw, spec.format).future, 'keep');
@@ -34,10 +75,10 @@ test('preview checksum protects external edits and restore preserves original by
     const path = nativeConfigFiles('codex', { home: dir, env: {} })[0].path;
     await mkdir(join(path, '..'), { recursive: true }); const original = '# original\nmodel = "old"\n[unrelated]\nvalue = 3\n'; await writeFile(path, original);
     const saved = await service.save({ tool: 'codex', providerId: 'official', model: 'new' }); const preview = await service.preview({ tool: 'codex' });
-    await writeFile(path, original + 'other = true\n'); await assert.rejects(service.apply({ tool: 'codex', checksums: Object.fromEntries(preview.files.map(x => [x.path, x.checksum])) }), { status: 409 });
-    await writeFile(path, original); const applied = await service.apply({ tool: 'codex', revision: saved.revision });
-    assert.match(await readFile(path, 'utf8'), /new/); await service.restore({ backupId: applied.backupId }); assert.equal(await readFile(path, 'utf8'), original);
-    const again = await service.apply({ tool: 'codex' }); await writeFile(path, 'model = "external"\n'); await assert.rejects(service.restore({ backupId: again.backupId }), { status: 409 });
+    await writeFile(path, original + 'other = true\n'); await assert.rejects(service.apply({ tool: 'codex', confirmNativeWrite: true, revision: preview.revision, checksums: Object.fromEntries(preview.files.map(x => [x.path, x.checksum])) }), { status: 409 });
+    await writeFile(path, original); const applied = await applyNative(service, { tool: 'codex', revision: saved.revision });
+    assert.match(await readFile(path, 'utf8'), /new/); await service.restore({ confirmNativeWrite: true, backupId: applied.backupId }); assert.equal(await readFile(path, 'utf8'), original);
+    const again = await applyNative(service, { tool: 'codex' }); await writeFile(path, 'model = "external"\n'); await assert.rejects(service.restore({ confirmNativeWrite: true, backupId: again.backupId }), { status: 409 });
     await assert.rejects(service.save({ tool: 'codex', providerId: 'official', model: 'new', expectedRevision: 'stale' }), { status: 409 });
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
@@ -49,7 +90,7 @@ test('bindings, advanced validation and symlinks prevent unsafe changes', async 
     await assert.rejects(service.preview({ tool: 'claude' }), { status: 409 });
     for (const overrides of [{ settings: { env: { ANTHROPIC_API_KEY: 'other' } } }, { config: { base_url: 'https://evil.test' } }, JSON.parse('{"__proto__":{"polluted":true}}')]) await assert.rejects(service.save({ tool: 'codex', providerId: 'official', model: 'test', overrides }));
     await service.setBindings({ providerId: 'official', tools: ['claude'] });
-    await symlink(join(dir, 'elsewhere'), join(dir, '.claude')); await assert.rejects(service.apply({ tool: 'claude' }), { status: 409 });
+    await symlink(join(dir, 'elsewhere'), join(dir, '.claude')); await assert.rejects(applyNative(service, { tool: 'claude' }), { status: 409 });
     assert.equal({}.polluted, undefined);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
@@ -69,13 +110,13 @@ test('runtime only uses applied snapshots and restores previous active selection
   try {
     await service.save({ tool: 'claude', providerId: 'official', model: 'first' });
     assert.equal((await service.runtime('claude')).configured, false);
-    const first = await service.apply({ tool: 'claude' }); assert.equal((await service.runtime('claude')).model, 'first');
+    const first = await applyNative(service, { tool: 'claude' }); assert.equal((await service.runtime('claude')).model, 'first');
     await service.save({ tool: 'claude', providerId: 'official', model: 'second' }); assert.equal((await service.runtime('claude')).model, 'first');
-    const second = await service.apply({ tool: 'claude' }); assert.equal((await service.runtime('claude')).model, 'second');
-    await service.restore({ backupId: second.backupId }); assert.equal((await service.runtime('claude')).model, 'first');
+    const second = await applyNative(service, { tool: 'claude' }); assert.equal((await service.runtime('claude')).model, 'second');
+    await service.restore({ confirmNativeWrite: true, backupId: second.backupId }); assert.equal((await service.runtime('claude')).model, 'first');
     await service.setBindings({ providerId: 'official', tools: ['harness'] }); await assert.rejects(service.runtime('claude'), { status: 409 });
     await service.setBindings({ providerId: 'official', tools: ['claude'] });
-    await service.restore({ backupId: first.backupId }); assert.equal((await service.runtime('claude')).configured, false);
+    await service.restore({ confirmNativeWrite: true, backupId: first.backupId }); assert.equal((await service.runtime('claude')).configured, false);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 

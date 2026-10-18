@@ -1,0 +1,16 @@
+.cmd-usage { color: var(--dsw-alias-label-primary, #242424); }
+.cmd-usage :is(.cmd-usage-refresh, .cmd-usage-metric small, .cmd-usage-note, .cmd-usage h3 span, .cmd-usage th, .cmd-usage td small, .cmd-usage-empty, .cmd-usage-dates, .cmd-usage-pagination) {
+  color: var(--dsw-alias-label-secondary, #818181);
+}
+.cmd-usage-presets,
+.cmd-usage-segment { background: var(--dsw-alias-interactive-bg-hover, #8881); }
+.cmd-usage-presets button[data-selected="true"],
+.cmd-usage-segment-thumb { background: var(--dsw-alias-bg-layer-1, #fff); }
+.cmd-usage-chart-point { fill: var(--dsw-alias-bg-layer-1, #fff); }
+.cmd-usage-metric { border-color: var(--dsw-alias-border-l2, #8882); }
+.cmd-usage th,
+.cmd-usage td,
+.cmd-usage-charts { border-color: var(--dsw-alias-border-l2, #8882); }
+.cmd-usage-history-table th { background: var(--dsw-alias-bg-base, #fff); }
+.cmd-usage-refresh:hover,
+.cmd-usage-history-table tr:hover td { background: var(--dsw-alias-interactive-bg-hover, #8881); }

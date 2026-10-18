@@ -1,4 +1,4 @@
-import { VoiceError } from './config.mjs';
+import { VoiceError, normalizeAsrModel } from './config.mjs';
 import { transcribe, upstreamFailure } from './media.mjs';
 
 /** Normalizes vendor SSE into cumulative replacement text, never append revised text twice. */
@@ -10,8 +10,9 @@ export async function streamTranscription(fetcher, config, bytes, signal, partia
   const mimo = protocol === 'mimo-sse';
   const fileStream = protocol === 'transcriptions-sse';
   let body;
-  if (fileStream) { body = new FormData(); body.set('file', new Blob([bytes], { type: 'audio/wav' }), 'segment.wav'); body.set('model', config.model); body.set('response_format', 'json'); body.set('stream', 'true'); }
-  else body = JSON.stringify(mimo ? { model: config.model, stream: true, messages: [{ role: 'user', content: [{ type: 'input_audio', input_audio: { data: audio, format: 'wav' } }] }] } : { audio: { data: audio, input: { format: { type: 'wav' }, transcription: { model: config.model, language: 'zh', enable_itn: true } } } });
+  const model = normalizeAsrModel(config.model);
+  if (fileStream) { body = new FormData(); body.set('file', new Blob([bytes], { type: 'audio/wav' }), 'segment.wav'); body.set('model', model); body.set('response_format', 'json'); body.set('stream', 'true'); }
+  else body = JSON.stringify(mimo ? { model, stream: true, messages: [{ role: 'user', content: [{ type: 'input_audio', input_audio: { data: audio, format: 'wav' } }] }] } : { audio: { data: audio, input: { format: { type: 'wav' }, transcription: { model, language: 'zh', enable_itn: true } } } });
   const upstream = await fetcher(config.baseURL + (fileStream ? '/audio/transcriptions' : mimo ? '/chat/completions' : '/audio/asr/sse'), { method: 'POST', headers: { ...(!fileStream ? { 'content-type': 'application/json' } : {}), accept: 'text/event-stream', ...(config.apiKey ? { authorization: 'Bearer ' + config.apiKey } : {}) }, body, signal, redirect: 'error' });
   if (!upstream.ok) throw await upstreamFailure(upstream, 'ASR', signal);
   if (!upstream.body || !upstream.headers.get('content-type')?.includes('text/event-stream')) { await upstream.body?.cancel(); throw new VoiceError('ASR service must return SSE', 502); }

@@ -21,7 +21,7 @@ function mount(overrides = {}) {
   module.exports.apply({ effect() {}, slots: { inject: (_, action) => action(), register: (options, component) => { registrations.push({ options, component }); } } });
   const component = registrations.find(item => item.options.name === 'conversation.input.activity').component;
   const render = (sessionId = 'session') => component({ controller, sessionId, locked: false, inputActions: {}, onActiveChange() {} });
-  return { render, effects, refs, actions, state };
+  return { render, effects, refs, actions, state, exports: module.exports };
 }
 const nodes = root => root && typeof root === 'object' ? [root, ...root.children.flatMap(nodes)] : [];
 test('call composer contains only microphone and hangup controls, never read or send', async () => {
@@ -45,6 +45,15 @@ test('muted call keeps playback phase and microphone can be enabled', async () =
   const rendered = orb.type(orb.props);
   assert.equal(rendered.props.className, 'voice-call-orb voice-orb-speaking');
   assert.equal(rendered.props.style['--voice-level'], .65);
+});
+test('TTS speed defaults to 1.2, stays in the supported range, and is round-tripped by settings', () => {
+  const h = mount();
+  assert.equal(h.exports.normalizeTtsSpeed(undefined), 1.2);
+  assert.equal(h.exports.normalizeTtsSpeed('1.375'), 1.38);
+  assert.equal(h.exports.normalizeTtsSpeed(0.1), 1.2);
+  assert.equal(h.exports.normalizeTtsSpeed(4.5), 1.2);
+  assert.equal(h.exports.draftFrom({ tts: { model: 'speaker', speed: 1.65 } }).tts.speed, 1.65);
+  assert.equal(h.exports.draftFrom({ tts: { model: 'speaker' } }).tts.speed, 1.2);
 });
 test('call takeover restores editor inert flags and card class after cleanup', () => {
   const h = mount(); const tree = h.render();

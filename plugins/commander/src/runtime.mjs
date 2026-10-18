@@ -120,15 +120,16 @@ export class Commander extends EventEmitter {
     if (nativeId && [...this.sessions.values()].some(s => s.provider === provider && s.nativeId === nativeId && this.drivers.has(s.id))) throw new Error('Native session already owned by Commander');
     if (route && nativeId) throw new Error('不能为已有原生会话自动绑定隔离供应商，请新建会话。');
     if (nativeMode && route) throw new Error('原生配置模式不能同时指定托管供应商。');
-    if (!nativeMode && !route && !nativeId && this.routeService && this.toolProfiles?.list) {
-      const defaults = (await this.toolProfiles.list()).defaults;
+    if (!nativeMode && !nativeId && this.routeService && this.toolProfiles?.list) {
+      const defaults = (await this.toolProfiles.list({ includeNative: false })).defaults;
       const selected = Array.isArray(defaults) ? defaults.find(item => item.tool === provider) : defaults?.[provider];
-      if (selected) route = selected;
+      if (!route && selected) route = selected;
+      else if (route && route.quickSettings === undefined && selected?.quickSettings) route = { ...route, quickSettings: selected.quickSettings };
     }
     if (route && !this.routeService) throw new Error('会话绑定服务不可用');
     const binding = route ? await this.routeService.capture({ ...route, tool: provider, model: route.model ?? model }) : undefined;
     const session = {
-      ...(binding ? { route: binding, routeMode: 'managed' } : { routeMode: 'native-unbound' }),
+      ...(binding ? { route: binding, routeMode: binding.mode } : { routeMode: 'native-unbound' }),
       id: randomUUID(), provider, cwd: await workingDirectory(cwd), ...((binding?.model ?? model) ? { model: binding?.model ?? model } : {}),
       ...(parentId ? { parentId } : {}), ...(nativeId ? { nativeId } : {}),
       ...(ownerSessionId ? { ownerSessionId } : {}),

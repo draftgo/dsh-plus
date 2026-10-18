@@ -97,11 +97,27 @@ export function mountHarnessAdapter(ctx, commander, { bindOwner, cwd, discover =
       controller.signal.addEventListener('abort', cancelled);
       commander.on('event', notify);
       try {
-        const existing = commander.list().find(session => !session.archived && (!session.parentId || session.harnessAdopted) && session.ownerSessionId === owner && session.provider === native && session.cwd === directory && (binding
-          ? session.route?.providerId === binding.providerId && session.route?.model === binding.model && session.model === nativeModel
+        const ownedSessions = commander.list().filter(session => !session.archived && (!session.parentId || session.harnessAdopted) && session.ownerSessionId === owner);
+        const existing = ownedSessions.find(session => session.provider === native && session.cwd === directory && (binding
+          ? session.route?.providerId === binding.providerId
           : !session.route && (session.model ?? 'native-default') === options.model));
+        if (existing && binding && (existing.route?.model !== binding.model || existing.model !== nativeModel)) {
+          if (['running', 'waiting', 'connecting'].includes(existing.status)) throw new Error('请等待当前轮次完成后再切换模型');
+          if (commander.pickerCatalog) {
+            const available = await commander.pickerCatalog.models(native);
+            if (!available.some(model => model.id === options.model)) throw new Error('工具供应商或模型已变更，请重新选择模型');
+          }
+          const driver = commander.drivers.get(existing.id);
+          if (driver && !driver.setModel) throw new Error(`${native} 当前连接不支持在同一会话中切换模型，请新建聊天`);
+          await driver?.setModel(nativeModel);
+          const record = commander.get(existing.id);
+          record.model = nativeModel;
+          record.route = binding;
+          await commander.persist();
+          commander.event(existing.id, 'model.changed', { providerId: binding.providerId, model: binding.model, nativeModel });
+        }
         if (!existing && commander.pickerCatalog) {
-          if (commander.list().some(session => !session.archived && (!session.parentId || session.harnessAdopted) && session.ownerSessionId === owner)) throw new Error('此对话已绑定其他工具或供应商模型；请新建聊天，已有记录与运行配置不会被修改');
+          if (ownedSessions.length) throw new Error('此对话已绑定其他工具或供应商模型；请新建聊天，已有记录与运行配置不会被修改');
           if (!binding) throw new Error('请选择已绑定供应商的工具模型；本机默认配置不会被自动用于新会话');
           const available = await commander.pickerCatalog.models(native);
           if (!available.some(model => model.id === options.model)) throw new Error('工具供应商或模型已变更，请重新选择模型');

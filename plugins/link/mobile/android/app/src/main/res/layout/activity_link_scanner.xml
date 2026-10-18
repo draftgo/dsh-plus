@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/scanner_root" android:layout_width="match_parent"
+    android:layout_height="match_parent" android:background="#F7F7F5" android:orientation="vertical">
+    <androidx.appcompat.widget.Toolbar
+        android:id="@+id/scanner_toolbar" android:layout_width="match_parent" android:layout_height="56dp"
+        app:navigationContentDescription="@string/scanner_back" app:navigationIcon="?attr/homeAsUpIndicator"
+        app:title="@string/scanner_title" app:titleTextColor="#1A1A1A" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginHorizontal="24dp" android:layout_marginTop="18dp"
+        android:text="@string/scanner_heading" android:textColor="#1A1A1A" android:textSize="26sp" android:textStyle="bold" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginHorizontal="24dp" android:layout_marginTop="10dp" android:layout_marginBottom="24dp"
+        android:lineSpacingExtra="4dp" android:text="@string/scanner_description" android:textColor="#737373" android:textSize="14sp" />
+    <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
+        android:layout_marginHorizontal="24dp" android:background="@drawable/scanner_camera_background" android:clipToOutline="true">
+        <com.journeyapps.barcodescanner.DecoratedBarcodeView
+            android:id="@+id/link_barcode_scanner" android:layout_width="match_parent" android:layout_height="match_parent"
+            app:zxing_scanner_layout="@layout/link_barcode_view" />
+        <LinearLayout android:id="@+id/camera_state" android:layout_width="match_parent" android:layout_height="match_parent"
+            android:background="#151515" android:gravity="center" android:orientation="vertical" android:padding="24dp">
+            <TextView android:id="@+id/camera_state_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center" android:text="@string/scanner_camera_loading" android:textColor="#FFFFFF" android:textSize="18sp" android:textStyle="bold" />
+            <TextView android:id="@+id/camera_state_description" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="12dp" android:gravity="center" android:lineSpacingExtra="4dp" android:textColor="#B5B5B5" android:textSize="14sp" />
+            <Button android:id="@+id/camera_state_action" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginTop="20dp" android:backgroundTint="#F7F7F5" android:minHeight="48dp" android:paddingHorizontal="20dp" android:textColor="#1A1A1A" />
+        </LinearLayout>
+    </FrameLayout>
+    <TextView android:id="@+id/scanner_feedback" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginHorizontal="24dp" android:layout_marginTop="18dp" android:accessibilityLiveRegion="polite"
+        android:gravity="center" android:lineSpacingExtra="4dp" android:text="@string/scanner_frame_hint" android:textColor="#737373" android:textSize="13sp" />
+    <Button android:id="@+id/scanner_flashlight" style="?android:attr/borderlessButtonStyle"
+        android:layout_width="wrap_content" android:layout_height="48dp" android:layout_gravity="center_horizontal"
+        android:layout_marginTop="8dp" android:enabled="false" android:paddingHorizontal="24dp"
+        android:text="@string/scanner_flash_on" android:textColor="#1A1A1A" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginHorizontal="24dp" android:layout_marginTop="8dp" android:layout_marginBottom="24dp"
+        android:gravity="center" android:lineSpacingExtra="4dp" android:text="@string/scanner_network_hint" android:textColor="#737373" android:textSize="12sp" />
+</LinearLayout>

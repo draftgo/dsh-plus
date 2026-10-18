@@ -34,6 +34,15 @@ export class ACPProvider {
     const driver = {
       nativeId: session.nativeId, turnId: undefined,
       async models() { return safeModels(modelsState); },
+      async setModel(modelId) {
+        if (!safeModels(modelsState).some(model => model.id === modelId)) throw new Error('Requested model is not advertised by ACP agent: ' + modelId);
+        const option = modelConfig();
+        if (option) await wire.request('session/set_config_option', { sessionId: driver.nativeId, configId: option.id, value: modelId });
+        else if (caps.sessionCapabilities?.setModel !== false) await wire.request('session/set_model', { sessionId: driver.nativeId, modelId });
+        else throw new Error('ACP agent does not support changing models in an existing session');
+        modelsState.currentModelId = modelId;
+        session.model = modelId;
+      },
       async commands() { if (!commandsReady) await commandsGate; return commandCatalog(commandList); },
       async command(value) { const cmd = normalizeCommand(value.name, value.arguments); const catalog = await driver.commands(); if (!catalog.some(item => item.name === cmd.name)) throw new Error('Unsupported native ACP command: /' + cmd.name); return driver.submit('/' + cmd.name + (cmd.arguments ? ' ' + cmd.arguments : '')); },
       async submit(text) {

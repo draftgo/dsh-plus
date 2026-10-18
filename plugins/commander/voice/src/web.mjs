@@ -1,7 +1,8 @@
-import { VoiceError } from './config.mjs';
+import { VoiceError, validateRealtime } from './config.mjs';
 import { LIMITS, readJson, readLimited, validateWav, transcribe, upstreamFailure } from './media.mjs';
 import { streamTranscription } from './asr.mjs';
 import { RealtimeASR } from './realtime.mjs';
+import { speechRequest } from './tts.mjs';
 import { CallLeases } from './calls.mjs';
 import { readFile } from 'node:fs/promises';
 
@@ -35,10 +36,11 @@ export function createVoiceHandlers(store, { fetcher = fetch, shutdown = new Abo
     const value = structuredClone(store.value[kind]);
     if (value.providerId) {
       if (!providers) throw new VoiceError('模型供应商服务尚未就绪', 409);
-      try { Object.assign(value, await providers.resolve(value.providerId)); }
+      try { const resolved = await providers.resolve(value.providerId); value.baseURL = resolved.baseURL; value.apiKey = resolved.apiKey; }
       catch { throw new VoiceError('模型供应商不可用，请检查模型设置中的 API 地址和密钥', 409); }
     }
     if (!value.baseURL || !value.model) throw new VoiceError(`Configure the ${kind.toUpperCase()} model first`, 409);
+    if (kind === 'asr' && value.realtime) value.realtime = validateRealtime(value.realtime, value.apiKey);
     return value;
   };
   const snapshot = async () => {
@@ -65,7 +67,7 @@ export function createVoiceHandlers(store, { fetcher = fetch, shutdown = new Abo
       if (input.action === 'providers') return Response.json({ providers: providers ? await providers.list() : [] }, { headers });
       if (input.action === 'models') { if (!providers) throw new VoiceError('模型供应商服务尚未就绪', 409); return Response.json({ models: await providers.models(input.providerId, request.signal) }, { headers }); }
       if (input.action === 'asr.start') {
-        const config = await provider('asr'); if (config.protocol !== 'step-websocket') throw new VoiceError('Select Step native streaming ASR first', 409);
+        const config = await provider('asr'); if (!['step-websocket', 'openai-websocket'].includes(config.protocol)) throw new VoiceError('Select a supported WebSocket transcription protocol first', 409);
         const callId = request.headers.get('x-voice-call-id') || '';
         if (callId ? !store.value.call : !store.value.dictation) throw new VoiceError('Voice input is disabled', 409);
         const signals = [shutdown, mediaGeneration.signal]; if (callId) signals.push(calls.media(callId));
@@ -119,7 +121,7 @@ export function createVoiceHandlers(store, { fetcher = fetch, shutdown = new Abo
       try {
         const upstream = await fetcher(`${config.baseURL}/audio/speech`, {
           method: 'POST', headers: { 'content-type': 'application/json', ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}) },
-          body: JSON.stringify({ model: config.model, voice: config.voice || (/^stepaudio-/u.test(config.model) ? 'cixingnansheng' : 'alloy'), input: input.text, response_format: 'pcm', sample_rate: 24000, stream: true }), signal: operation.signal, redirect: 'error',
+          body: JSON.stringify(speechRequest(config, input.text)), signal: operation.signal, redirect: 'error',
         });
         if (operation.signal.aborted) { await upstream.body?.cancel(); operation.signal.throwIfAborted(); }
         if (!upstream.ok) throw await upstreamFailure(upstream, 'TTS', operation.signal);

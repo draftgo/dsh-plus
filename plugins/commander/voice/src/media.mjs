@@ -1,4 +1,4 @@
-import { VoiceError } from './config.mjs';
+import { VoiceError, normalizeAsrModel } from './config.mjs';
 
 export const LIMITS = Object.freeze({ audioBytes: 2 * 1024 * 1024, audioSeconds: 15, jsonBytes: 32768, speechCharacters: 4000, speechBytes: 12 * 1024 * 1024, requestTimeout: 90000 });
 export async function readLimited(request, limit, signal = request.signal) {
@@ -59,7 +59,7 @@ export function validateWav(bytes) {
 }
 export async function transcribe(fetcher, config, bytes, signal) {
   const body = new FormData();
-  body.set('file', new Blob([bytes], { type: 'audio/wav' }), 'segment.wav'); body.set('model', config.model); body.set('response_format', 'json');
+  body.set('file', new Blob([bytes], { type: 'audio/wav' }), 'segment.wav'); body.set('model', normalizeAsrModel(config.model)); body.set('response_format', 'json');
   const upstream = await fetcher(`${config.baseURL}/audio/transcriptions`, { method: 'POST', headers: config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}, body, signal, redirect: 'error' });
   if (!upstream.ok) throw await upstreamFailure(upstream, 'ASR', signal);
   const raw = await readLimited(new Request('http://voice.internal', { method: 'POST', body: upstream.body, duplex: 'half', signal }), 65536);

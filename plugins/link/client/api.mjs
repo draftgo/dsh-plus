@@ -38,6 +38,7 @@ export function saveIdentity(identity) {
     localSaves.set(key, { count: (localSaves.get(key)?.count || 0) + 1, expiresAt: Date.now() + 15_000 });
   }
   else { browserIdentity = identity; try { sessionStorage.setItem('dsh.link.identity', JSON.stringify(identity)); } catch {} }
+  window.dispatchEvent(new Event('link:identity-updated'));
 }
 /** The Android bridge emits bootstrap after both scanning and JS identity saves. */
 export function isLocalIdentitySave(identity) {
@@ -53,6 +54,18 @@ export function clearIdentity() {
   else { browserIdentity = null; try { sessionStorage.removeItem('dsh.link.identity'); } catch {} }
 }
 export function scan() { native()?.scan?.(); }
+export async function openWorkbench() {
+  if (isNative()) {
+    if (!native().openWorkbench) throw new Error('请更新 Android 客户端以打开完整工作台');
+    const raw = native().openWorkbench();
+    const result = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (result?.error) throw new Error(result.error);
+    return;
+  }
+  const result = await jsonPost(new URL('/link/api/workbench', location.origin), {}, undefined, bootstrap()?.token);
+  if (result.url !== '/link/workbench/') throw new Error('工作台地址无效，请重新连接');
+  location.assign(result.url);
+}
 export function nativeCall(method, path, body) {
   const bridge = native();
   if (!bridge?.request) return Promise.reject(new Error('当前客户端不支持原生连接'));

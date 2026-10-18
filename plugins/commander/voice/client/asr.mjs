@@ -7,7 +7,7 @@ export async function readVoiceEvents(response, signal, onEvent) {
   try { while (true) { signal.throwIfAborted(); const { value, done } = await reader.read(); signal.throwIfAborted(); if (done) break; total += value.length; if (total > 16 * 1024 * 1024) throw Error('语音事件流超限'); pending += decoder.decode(value, { stream: true }); if (pending.length > 65536) throw Error('语音事件过大'); let end; while ((end = pending.indexOf(String.fromCharCode(10))) >= 0) { parse(pending.slice(0, end)); pending = pending.slice(end + 1); } } pending += decoder.decode(); if (pending.trim()) parse(pending); }
   finally { signal.removeEventListener('abort', abort); await reader.cancel().catch(() => {}); reader.releaseLock(); }
 }
-export class StepRecognizer {
+export class RealtimeRecognizer {
   constructor({ request, endpoint, headers, onError }) { Object.assign(this, { request, endpoint, headers, onError }); this.abort = new AbortController(); this.utterances = new Map(); this.closed = false;this.transport=Promise.resolve(); }
   async action(action, extra = {}, signal = this.abort.signal) {
     if(action !== 'asr.events') signal = AbortSignal.any([signal, AbortSignal.timeout(12000)]);

@@ -11,6 +11,7 @@ export class CodexProvider {
     let previousUsage, previousUsageKey;
     const driver = {
       nativeId: session.nativeId,
+      async setModel(model) { session.model = model || undefined; },
       turnId: undefined,
       compacting: false,
       async commands() {
@@ -31,12 +32,12 @@ export class CodexProvider {
         }
         const skill = driver.skills?.find(entry => entry.name === name);
         if (!skill?.path) throw new Error(`Unsupported native Codex command: /${name}`);
-        const response = await wire.request('turn/start', { threadId: driver.nativeId, input: [{ type: 'skill', name: skill.name, path: skill.path }, { type: 'text', text: `$${name}${args ? ` ${args}` : ''}` }] });
+        const response = await wire.request('turn/start', { threadId: driver.nativeId, ...(session.model ? { model: session.model } : {}), input: [{ type: 'skill', name: skill.name, path: skill.path }, { type: 'text', text: `$${name}${args ? ` ${args}` : ''}` }] });
         driver.turnId = response.turn.id;
       },
       async submit(text) {
         const response = await wire.request('turn/start', {
-          threadId: driver.nativeId, input: [{ type: 'text', text }],
+          threadId: driver.nativeId, ...(session.model ? { model: session.model } : {}), input: [{ type: 'text', text }],
         });
         driver.turnId = response.turn.id;
       },
@@ -72,7 +73,7 @@ export class CodexProvider {
         case 'thread/compacted':
           if (driver.compacting) { driver.compacting = false; host.event('turn.completed', { status: 'completed', command: 'compact' }); }
           break;
-        case 'turn/started': driver.turnId = p.turn.id; host.event('turn.started', { nativeTurnId: p.turn.id }); break;
+        case 'turn/started': driver.turnId = p.turn.id; host.event('turn.started', { nativeTurnId: p.turn.id, model: session.model ?? null }); break;
         case 'turn/completed':
           driver.turnId = undefined;
           driver.compacting = false;
@@ -115,6 +116,10 @@ export class CodexProvider {
     try {
       await wire.request('initialize', { clientInfo: { name: 'dowork_commander', version: '0.1.0' }, capabilities: { experimentalApi: true } });
       wire.notify('initialized', {});
+      if (this.config.managedProfile?.subscription) {
+        const { account } = await wire.request('account/read', { refreshToken: false });
+        if (account?.type !== 'chatgpt') throw new Error('请先在本机 Codex 中完成 ChatGPT 登录，不能用 API 密钥替代订阅。');
+      }
       const params = { cwd: session.cwd, approvalPolicy: 'on-request', sandbox: 'workspace-write', ...(session.model ? { model: session.model } : {}) };
       const result = await wire.request(session.nativeId ? 'thread/resume' : 'thread/start', {
         ...params, ...(session.nativeId ? { threadId: session.nativeId } : {}),

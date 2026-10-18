@@ -1,5 +1,5 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { LinkMobileApp } from './mobile.jsx';
+import { LinkWorkbenchEntry } from './workbench-entry.jsx';
 
-createRoot(document.getElementById('root')).render(<LinkMobileApp />);
+createRoot(document.getElementById('root')).render(<LinkWorkbenchEntry />);

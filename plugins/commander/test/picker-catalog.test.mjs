@@ -152,3 +152,23 @@ test('model metadata resolves concurrently without changing model associations',
   gates.get('first').resolve({ context: { contextWindow: 100 } });
   assert.deepEqual((await result).map(row => [row.nativeModelId, row.context.contextWindow]), [['first', 100], ['second', 200]]);
 });
+
+test('subscription routes use only the matching installed tool and never expose other tool routes', async () => {
+  const provider = { id: 'openai-codex', name: 'ChatGPT', authMode: 'subscription', configured: true, harnessTools: ['codex'] };
+  const { service } = catalogFixture({ providers: { list: async () => [provider, { id: 'api', name: 'API' }] }, profiles: { list: async () => ({ bindings: { 'openai-codex': ['harness', 'claude', 'pi'] } }) } });
+  const catalog = await service.list();
+  const subscription = catalog.providers.find(row => row.id === 'openai-codex');
+  assert.deepEqual(subscription.tools, ['codex']);
+  assert.equal(subscription.nativeRequired, true);
+  assert(catalog.routes.some(row => row.providerId === provider.id && row.tool === 'codex' && row.authMode === 'subscription'));
+  assert(catalog.routes.filter(row => row.providerId === provider.id).every(row => row.tool === 'codex'));
+  assert.deepEqual(catalog.providers.find(row => row.id === 'api').tools, ['deepseek', 'codex', 'claude']);
+  provider.configured = false;
+  assert.equal((await service.list()).routes.some(row => row.providerId === provider.id), false);
+});
+test('subscription without an official model directory stays visible with no selectable fake models', async () => {
+  let apiDiscovery = 0;
+  const { service } = catalogFixture({ llm: undefined, providers: { list: async () => [{ id: 'openai-codex', authMode: 'subscription', configured: true, harnessTools: ['codex'] }], models: async () => { apiDiscovery++; return [{ id: 'fake' }]; } } });
+  const catalog = await service.list();
+  assert.equal(catalog.providers[0].nativeRequired, true); assert.deepEqual(catalog.routes, []); assert.equal(apiDiscovery, 0);
+});

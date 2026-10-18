@@ -2,9 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import vm from 'node:vm';
-import {Capture,PCMPlayer,pcmWav} from '../client/media.mjs';
+import {Capture,PCMPlayer,pcmWav,HTTP_CHUNK_SECONDS} from '../client/media.mjs';
 const frame=(n=2000)=>new Int16Array(480).fill(n);
 const tick=()=>new Promise(r=>setTimeout(r,0));
+test('HTTP ASR starts a short WAV upload while the user is still speaking',async()=>{
+  let calls=0;const c=new Capture({transcribe:async()=>{calls++;return '';}});
+  for(let i=0;i<Math.ceil(HTTP_CHUNK_SECONDS*50)+2;i++)c.accept(frame());
+  await tick();assert.equal(calls,1);await c.dispose();
+});
 test('WAV is mono little-endian PCM24k',async()=>{const v=new DataView(await pcmWav([new Int16Array([-32768,32767])]).arrayBuffer());assert.equal(v.getUint32(24,true),24000);assert.equal(v.getUint16(22,true),1);assert.equal(v.getInt16(44,true),-32768);assert.equal(v.getUint32(40,true),4);});
 test('short utterance retains preroll and commits only after ASR',async()=>{
   const events=[];let finish;const c=new Capture({silenceMs:100,transcribe:()=>new Promise(r=>finish=r),onSpeechStart:()=>events.push('start'),onPartial:t=>events.push('partial:'+t),onFinal:t=>events.push('final:'+t)});

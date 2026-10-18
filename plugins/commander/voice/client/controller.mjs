@@ -1,4 +1,4 @@
-import { readVoiceEvents, StepRecognizer } from './asr.mjs';
+import { readVoiceEvents, RealtimeRecognizer } from './asr.mjs';
 import { Capture, PCMPlayer } from './media.mjs';
 import { SpeakableChunker, SpeechQueue } from './speech.mjs';
 import { AgentFeed } from './agent-feed.mjs';
@@ -82,9 +82,9 @@ export function createVoiceController(ctx,deps={}) {
       if(!inputActions.insertText(text,span)){draftConflict=true;patch({error:'草稿已被修改，请复制语音栏转录文字后插入',transcript:text});return;}
       inserted=text;const next=inputActions.captureInsertion();span={start:span.start,end:span.start+text.length,draftRev:next.draftRev};inputActions.persistDraft();
     };
-    const realtime=config.asr.protocol==='step-websocket'?new StepRecognizer({request,endpoint:url,headers:callHeaders,onError:error=>{if(gen===generation){fail(error);void api.hangup();}}}):null;
+    const realtime=['step-websocket','openai-websocket'].includes(config.asr.protocol)?new RealtimeRecognizer({request,endpoint:url,headers:callHeaders,onError:error=>{if(gen===generation){fail(error);void api.hangup();}}}):null;
     if(realtime){createdCapture={dispose:()=>realtime.close()};capture=createdCapture;await realtime.start();if(gen!==generation){await realtime.close();return;}}
-    createdCapture=makeCapture({realtime,workletURL:url('api/voice/worklet'),transcribe:async(blob,signal,onPartial)=>{
+    createdCapture=makeCapture({realtime,parallel:['transcriptions-sse','mimo-sse','step-sse'].includes(config.asr.protocol),workletURL:url('api/voice/worklet'),transcribe:async(blob,signal,onPartial)=>{
       const response=await request(url('api/voice/transcribe'),{method:'POST',credentials:'same-origin',signal,headers:{'content-type':'audio/wav',...callHeaders()},body:blob});
       if(response.headers.get('content-type')?.includes('application/x-ndjson')){let text='',final=false;await readVoiceEvents(response,signal,event=>{if(event.type==='partial'){text=event.text;onPartial?.(text);}if(event.type==='final'){text=event.text;final=true;}});if(!final)throw Error('识别连接在最终结果前关闭');return {text};}
       const result=await response.json();if(!response.ok)throw Error(result.error||'转录失败');return result;

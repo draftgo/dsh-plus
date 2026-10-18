@@ -26,7 +26,7 @@ export async function apply(ctx, config = {}) {
   });
   ctx.inject(['connection'], async child => { await mountUsage(child, commander, config.usage ?? {}); });
   ctx.inject(['connection', 'workspaceRegistry'], async child => { await mountWeb(child, commander, config); });
-  ctx.inject(['connection', 'workspaceRegistry', 'typertGateway', 'sessionController'], async child => {
+  ctx.inject(['connection', 'workspaceRegistry', 'typertGateway', 'sessionController', 'webServer', 'clientModules'], async child => {
     await mountLink(child, { ...config.link, directory: config.link?.directory, webRoot: new URL('../lib/link-web/', import.meta.url) });
   });
   const owners = new Map();

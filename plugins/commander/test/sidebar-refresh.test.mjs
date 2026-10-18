@@ -24,5 +24,5 @@ test('visibility changes never overlap requests and disposed failures do not not
 });
 test('a failed visible request retries instead of stopping the sidebar', async () => {
   let reads = 0; const f = fixture(async () => { if (++reads === 1) throw Error('offline'); }); await flush();
-  assert.equal(f.errors.length, 1); assert.equal(f.jobs.size, 1); f.tick(); await flush(); assert.equal(reads, 2); f.stop();
+  assert.equal(f.errors.length, 1); assert.equal([...f.jobs.values()][0].ms, 1000); f.tick(); await flush(); assert.equal(reads, 2); assert.equal([...f.jobs.values()][0].ms, 10000); f.stop();
 });

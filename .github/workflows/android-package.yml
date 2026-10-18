@@ -1,0 +1,45 @@
+name: DSH-Plus Android package
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to receive the APK
+        required: true
+        default: v0.1.1
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: plugins/link/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Link dependencies
+        run: npm ci --prefix plugins/link
+      - name: Build Android debug package
+        run: npm run build:android
+      - name: Verify package metadata
+        shell: bash
+        run: |
+          test -f plugins/link/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          $ANDROID_HOME/build-tools/35.0.0/aapt dump badging plugins/link/mobile/android/app/build/outputs/apk/debug/app-debug.apk | grep "versionName='0.1.1'"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-plus-android-0.1.1-debug
+          path: plugins/link/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, stat, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { VoiceConfig, updateConfig, publicConfig, migrateLegacyConfig } from '../src/config.mjs';
+import { VoiceConfig, updateConfig, publicConfig, migrateLegacyConfig, normalizeTtsModel, normalizeAsrModel } from '../src/config.mjs';
 import { createVoiceHandlers, mountWeb } from '../src/web.mjs';
 import { validateWav } from '../src/media.mjs';
 import { CallLeases } from '../src/calls.mjs';
@@ -16,7 +16,7 @@ const input = bytes => new Request('http://app.test/api/voice/transcribe', { met
 
 test('shared provider references clear borrowed secrets and resolve server-side only', async () => {
   const store = memory();
-  await store.configure({ asr: { providerId: 'routergo', baseURL: 'https://ignored.test', apiKey: 'clear-me', model: 'whisper-test' } });
+  await store.configure({ asr: { providerId: 'routergo', baseURL: 'https://ignored.test', apiKey: 'clear-me', model: 'whisper-test', protocol: 'transcriptions' } });
   assert.equal(store.value.asr.apiKey, ''); assert.equal(store.value.asr.baseURL, '');
   const handlers = createVoiceHandlers(store, { providers: {
     resolve: async () => ({ baseURL: 'https://shared.test/v1', apiKey: 'server-only-key' }),
@@ -60,6 +60,16 @@ test('configuration is durable, private, masked and serialized without losing co
     await reopened.configure({ asr: { model: 'new-model' } }); assert.equal(reopened.value.asr.apiKey, 'keep-me');
     await reopened.configure({ asr: { apiKey: '' } }); assert.equal(reopened.snapshot().asr.apiKeyConfigured, false);
     assert.equal(JSON.parse(await readFile(store.path, 'utf8')).asr.model, 'new-model');
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('fresh voice configuration defaults to the verified Step multipart SSE route', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'voice-defaults-'));
+  try {
+    const store = await new VoiceConfig({ dataDir: directory }).open();
+    assert.equal(store.value.asr.model, 'stepaudio-2.5-asr');
+    assert.equal(store.value.asr.protocol, 'transcriptions-sse');
+    assert.equal(store.value.tts.model, 'stepaudio-2.5-tts');
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
@@ -116,7 +126,7 @@ test('TTS streams promptly, rejoins odd-byte chunks and never accepts frontend c
   const response = await handlers.speech(json('/api/voice/speech', { text: 'hello', model: 'not-used', apiKey: 'not-used' }));
   assert.equal(response.headers.get('x-voice-sample-rate'), '24000'); assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.deepEqual([...new Uint8Array(await response.arrayBuffer())], [1, 2, 3, 4]);
-  assert.deepEqual(sent, { model: 'speaker', voice: 'alloy', input: 'hello', response_format: 'pcm', sample_rate: 24000, stream: true });
+  assert.deepEqual(sent, { model: 'speaker', voice: 'alloy', input: 'hello', response_format: 'pcm', speed: 1.2 });
 });
 
 test('disabled features and missing models are rejected before provider access', async () => {
@@ -174,12 +184,13 @@ test('call APIs bind media to lease; config change and hangup abort live audio i
 });
 
 test('Step native realtime routes enforce owner boundary, forward PCM, stream revisions and cancel on config change', async()=>{
-  const {EventEmitter}=await import('node:events');let socket;
+  const {EventEmitter}=await import('node:events');let socket, connectedUrl;
   class FakeSocket extends EventEmitter{constructor(){super();this.sent=[];this.bufferedAmount=0;queueMicrotask(()=>this.emit('open'));}send(raw){const e=JSON.parse(raw);this.sent.push(e);if(e.type==='session.update')queueMicrotask(()=>this.emit('message',JSON.stringify({type:'session.updated'})));}close(){this.closed=true;}}
-  const store=memory();store.value.asr.protocol='step-websocket';store.value.asr.model='stepaudio-2.5-asr-stream';
-  const h=createVoiceHandlers(store,{socket:()=>socket=new FakeSocket()});
+  const store=memory();store.value.asr.protocol='step-websocket';store.value.asr.model='stepaudio-2.5-asr-stream';store.value.asr.baseURL='https://routergo.cn/api/v1';store.value.asr.realtime={url:'wss://routergo.cn/api/v1/realtime',query:{model:'{model}',intent:'transcription',exit_id:'stepfun.audio.transcriptions.websocket'}};
+  const h=createVoiceHandlers(store,{socket:(url)=>{connectedUrl=url;return socket=new FakeSocket();}});
   assert.equal((await h.config(json('/api/voice',{action:'asr.start'},{headers:{'content-type':'application/json',origin:'https://evil.test'}}))).status,403);
   const started=await h.config(json('/api/voice',{action:'asr.start'}));assert.equal(started.status,200);const {id}=await started.json();
+  assert.equal(connectedUrl,'wss://routergo.cn/api/v1/realtime?model=stepaudio-2.5-asr-stream&intent=transcription&exit_id=stepfun.audio.transcriptions.websocket');
   const downstream=await h.config(json('/api/voice',{action:'asr.events',id}));assert.equal(downstream.headers.get('content-type'),'application/x-ndjson');const reader=downstream.body.getReader();
   const append=await h.realtimeAppend(new Request('http://app.test/api/voice/realtime/audio',{method:'POST',headers:{'content-type':'application/octet-stream','x-voice-session-id':id,'x-voice-utterance-id':'1'},body:new Uint8Array(4800)}));assert.equal(append.status,200);assert.equal(socket.sent[1].type,'input_audio_buffer.append');
   const committed=await h.config(json('/api/voice',{action:'asr.commit',id,utteranceId:1}));assert.equal(committed.status,200);
@@ -192,12 +203,30 @@ test('SSE transcription route emits partials and final; Step TTS chooses actual 
   const store=memory();store.value.asr.protocol='step-sse';store.value.tts.model='stepaudio-2.5-tts';store.value.tts.voice='';
   const h=createVoiceHandlers(store,{fetcher:async(url,options)=>{
     if(url.endsWith('/audio/asr/sse'))return new Response('data: {"type":"transcript.text.delta","delta":"你"}\n\ndata: {"type":"transcript.text.done","text":"你好"}\n\n',{headers:{'content-type':'text/event-stream'}});
-    const body=JSON.parse(options.body);assert.equal(body.voice,'cixingnansheng');assert.equal(body.sample_rate,24000);return new Response(new Uint8Array(4),{headers:{'content-type':'audio/pcm'}});
+    const body=JSON.parse(options.body);assert.equal(body.voice,'cixingnansheng');assert.equal(body.sample_rate,24000);assert.equal(body.speed,1.2);return new Response(new Uint8Array(4),{headers:{'content-type':'audio/pcm'}});
   }});
   const response=await h.transcribe(input(wav())),events=(await response.text()).trim().split('\n').map(JSON.parse);assert.deepEqual(events.map(e=>e.type),['partial','partial','final']);assert.equal(events.at(-1).text,'你好');
   assert.equal((await (await h.speech(json('/api/voice/speech',{text:'测试'}))).arrayBuffer()).byteLength,4);h.dispose();
 });
-test('pre-protocol RouterGo settings migrate to verified streaming endpoint; explicit choice is preserved', async () => {
+
+test('StepFun 2.5 TTS alias is normalized to the public stepaudio model ID', async () => {
+  assert.equal(normalizeTtsModel('stepfun-2.5-tts'), 'stepaudio-2.5-tts');
+  assert.equal(normalizeAsrModel('step-asr'), 'stepaudio-2.5-asr');
+  assert.equal(updateConfig(memory().value, { asr: { model: 'step-asr' }, tts: { model: 'stepfun-2.5-tts' } }).asr.model, 'stepaudio-2.5-asr');
+  let sent;
+  const store = memory(); store.value.tts.model = 'stepfun-2.5-tts'; store.value.tts.voice = '';
+  const h = createVoiceHandlers(store, { fetcher: async (_url, options) => { sent = JSON.parse(options.body); return new Response(new Uint8Array([1, 0]), { headers: { 'content-type': 'audio/pcm' } }); } });
+  await (await h.speech(json('/api/voice/speech', { text: '测试' }))).arrayBuffer();
+  assert.equal(sent.model, 'stepaudio-2.5-tts'); assert.equal(sent.voice, 'cixingnansheng'); assert.equal(sent.speed, 1.2); h.dispose();
+});
+test('model selection preserves explicit protocols without guessing transport from the model name', () => {
+  const base = memory().value; base.asr.protocol = 'transcriptions-sse';
+  assert.equal(updateConfig(base, { asr: { model: 'stepaudio-2.5-asr-stream' } }).asr.protocol, 'transcriptions-sse');
+  const native = updateConfig(base, { asr: { model: 'stepaudio-2.5-asr-stream', protocol: 'step-websocket' } });
+  assert.equal(updateConfig(native, { asr: { model: 'stepaudio-2.5-asr' } }).asr.protocol, 'step-websocket');
+  assert.equal(updateConfig(base, { asr: { model: 'stepaudio-2.5-asr-stream', protocol: 'transcriptions' } }).asr.protocol, 'transcriptions');
+});
+test('pre-protocol model migration is provider independent and preserves explicit choices', async () => {
   const legacy = { asr: { providerId: 'routergo', model: 'mimo-v2.5-asr' } };
   assert.equal(migrateLegacyConfig(legacy).asr.protocol, 'transcriptions-sse');
   assert.equal(legacy.asr.protocol, undefined);

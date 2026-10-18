@@ -1,10 +1,15 @@
 {
   "name": "dsh-plus",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "DSH-Plus plugin, voice and paired remote clients for the official DeepSeek Harness",
   "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./plugins/commander/cordis.patch.yml"
+    }
+  },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
@@ -16,6 +21,7 @@
     "start": "node scripts/harness.mjs start:desktop",
     "dev:web": "node scripts/harness.mjs dev:web",
     "start:web": "node scripts/harness.mjs start:web",
+    "experience": "node scripts/experience.mjs",
     "typecheck": "node scripts/harness.mjs typecheck",
     "lint": "node scripts/harness.mjs lint",
     "package:dir": "node scripts/harness.mjs package:desktop:dir",

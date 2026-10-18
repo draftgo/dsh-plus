@@ -9,6 +9,8 @@ export function toolState(tool, capability = {}) {
     configSupported: capability.configSupported ?? tool.configSupported ?? false,
     chatSupported: capability.sessionSupported ?? tool.chatSupported ?? false,
     canInstall: !!tool.canInstall && !activeJob(tool.job),
+    canUpdate: !!tool.canUpdate && !activeJob(tool.job),
+    canReinstall: !!tool.canReinstall && !activeJob(tool.job),
     canUninstall: !!tool.canUninstall && !activeJob(tool.job),
   };
 }
@@ -27,6 +29,29 @@ export function parseOverrides(text) {
   };
   walk(value); return value;
 }
-export function profileDraft(profile) { return { providerId: profile?.providerId || '', model: profile?.model || '', protocol: profile?.protocol || '', overrides: JSON.stringify(profile?.overrides || {}, null, 2), revision: profile?.revision }; }
-export function eligibleProviders(providers, bindings, tool) { return providers.filter(provider => !Array.isArray(bindings?.[provider.id]) || bindings[provider.id].includes(tool)); }
+export function profileDraft(profile) { return { providerId: profile?.providerId || '', model: profile?.model || '', protocol: profile?.protocol || '', overrides: JSON.stringify(profile?.overrides || {}, null, 2), quickSettings: { ...profile?.quickSettings }, revision: profile?.revision }; }
+export function eligibleProviders(providers, bindings, tool, access = []) {
+  return providers.filter(provider => {
+    const identity = access.find(item => item.id === provider.id) || provider;
+    return (identity.authMode !== 'subscription' || identity.harnessTools?.includes(tool)) && (!Array.isArray(bindings?.[provider.id]) || bindings[provider.id].includes(tool));
+  });
+}
+export function setQuickSetting(settings, key, value) {
+  const next = { ...settings };
+  if (value === undefined || value === '') delete next[key]; else next[key] = value;
+  return next;
+}
+export function nativeOnlyDraft(tool, text) {
+  if (tool?.routeSupported === false) return true;
+  try { return Object.keys(parseOverrides(text)).length > 0; } catch { return true; }
+}
+export function nextToolTab(tools, selected, key) {
+  if (!tools.length) return selected;
+  if (key === 'Home') return tools[0].id;
+  if (key === 'End') return tools.at(-1).id;
+  const index = tools.findIndex(tool => tool.id === selected);
+  if (key === 'ArrowRight' || key === 'ArrowDown') return tools[(index + 1) % tools.length].id;
+  if (key === 'ArrowLeft' || key === 'ArrowUp') return tools[(index - 1 + tools.length) % tools.length].id;
+  return selected;
+}
 export function previewChecksums(preview) { return Object.fromEntries((preview?.files || []).map(file => [file.path, file.checksum ?? null])); }

@@ -6,7 +6,7 @@
 
 客户端仅通过官方 `dsh.client` 和 Slot 定制项目侧栏，使用官方 React、图标和主题变量。新聊天进入 Harness 原始启动页；工具及模型注册到官方 LLM 模型菜单。输入框、消息列表、流式 Markdown、停止、审批和问题继续复用官方交互，不再维护 Commander 独立聊天页或工具卡片。
 
-发送链路为浏览器官方 UI → Harness Agent → Commander LLM adapter → 原生 CLI/SDK。原生工具执行自身工具调用，adapter 只投影文字流，不把原生工具事件伪装成 Harness 工具调用，避免重复执行。当前支持纯文本，不接受附件。工具过程仍保存在 Commander 事件中，尚未映射到官方轨迹视图。标题生成等辅助请求不会启动原生任务；原生压缩使用 `/native compact`，不冒充支持 Harness 的辅助压缩请求。
+发送链路为浏览器官方 UI → Harness Agent → Commander LLM adapter → 原生 CLI/SDK。原生工具执行自身工具调用，adapter 只投影文字流，不把原生工具事件伪装成 Harness 工具调用，避免重复执行。Commander 将原生工具活动单独显示在输入区下方，不写入模型消息或 Harness 工具轨迹；完整事件仍保存在 Commander 日志中。模型选择参考 Paseo `setAgentModel` 和 Codex 每轮 `turn/start.model`（Paseo 参考提交 `d57096a4568cd2db106f35a0c5011627de53a646`）：绑定对话可在原工具、同隔离供应商内切换模型，当前轮完成后应用；切换工具或隔离供应商仍需新建聊天。使用本机默认模型且没有隔离供应商身份的旧会话不能切换到托管供应商模型。当前支持纯文本，不接受附件。标题生成等辅助请求不会启动原生任务；原生压缩使用 `/native compact`，不冒充支持 Harness 的辅助压缩请求。
 
 点击新聊天会创建或复用官方空白 Harness 会话，但侧栏不显示空白项，原生进程与持久原生会话在首次发送时才建立。多轮按 Harness 会话、工具、模型和目录复用原生句柄，使用持久消息 ID 去重。切换模型会选择另一条原生上下文，不承诺不同工具上下文自动合并。
 

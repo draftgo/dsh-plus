@@ -12,7 +12,9 @@ class VoiceCaptureProcessor extends AudioWorkletProcessor {
 }
 class VoicePlaybackProcessor extends AudioWorkletProcessor {
   constructor(){super();this.ring=new Float32Array(RATE*8);this.epoch=0;this.coefficients=coefficients(Math.min(1,sampleRate/RATE)*.94);this.reset();this.port.onmessage=({data:m})=>{if(m.type==='clear'){this.epoch=m.epoch;this.reset();}else if(m.epoch===this.epoch&&m.type==='pcm'){const samples=new Int16Array(m.data);if(samples.length+this.written-Math.floor(this.position)>this.ring.length-HALF){this.port.postMessage({type:'error',epoch:this.epoch,error:'播放缓冲超限'});return;}this.spans.push({at:this.written,id:m.id});for(const v of samples)this.ring[this.written++%this.ring.length]=v/32768;}else if(m.epoch===this.epoch&&m.type==='end')this.ends.push({at:this.written,id:m.id});};}
-  reset(){this.ring.fill(0);this.position=0;this.written=0;this.acked=0;this.ends=[];this.spans=[];this.started=false;this.meterFrames=0;this.target=RATE*.12;this.stable=0;}
+  // Start after a short 80 ms cushion; grow it adaptively only when a stream
+  // underruns, so the first TTS packet becomes audible sooner.
+  reset(){this.ring.fill(0);this.position=0;this.written=0;this.acked=0;this.ends=[];this.spans=[];this.started=false;this.meterFrames=0;this.target=RATE*.08;this.stable=0;}
   process(_inputs,outputs){const out=outputs[0]?.[0];if(!out)return true;out.fill(0);const step=RATE/sampleRate;let rendered=false;
     for(let i=0;i<out.length;i++){
       const remaining=this.written-this.position,complete=this.ends.some(e=>e.at===this.written);

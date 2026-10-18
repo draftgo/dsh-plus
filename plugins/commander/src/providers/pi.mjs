@@ -22,6 +22,13 @@ export class PiProvider {
     let agentStarted = false;
     const driver = {
       nativeId: session.nativeId,
+      async setModel(model) {
+        if (typeof model !== 'string' || !model.includes('/')) throw new Error('Pi model must include provider/model');
+        const [provider, ...parts] = model.split('/');
+        if (!provider || !parts.length) throw new Error('Pi model must include provider/model');
+        await wire.request('set_model', { provider, modelId: parts.join('/') });
+        session.model = model;
+      },
       async submit(text) {
         const generation = ++promptGeneration;
         agentStarted = false;

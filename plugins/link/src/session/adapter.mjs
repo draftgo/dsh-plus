@@ -60,12 +60,15 @@ export function createSessionAdapter(ctx, _options = {}) {
   const getPeer = async device => {
     const id = string(device?.id, 'device id');
     let record = peers.get(id);
-    if (record) { await record.ready; if (record.error) throw record.error; touch(record); return record; }
+    if (record) { if (record.error) throw record.error; touch(record); return record; }
     record = { id, peer: ctx.connection.createPeer({ principal: { kind: 'owner' }, interactions: 'answer' }), abort: new AbortController(), pending: new Map(), waits: new Map(), waitErrors: new Map(), active: 0 };
     peers.set(id, record);
     touch(record);
     let resolveReady, rejectReady;
     record.ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+    // Most actions do not await readiness; keep a background stream failure
+    // observable through record.error without creating an unhandled rejection.
+    record.ready.catch(() => {});
     record.loop = (async () => {
       try {
         const stream = await ctx.typertGateway.wireStream.open('$events', { args: {} }, empty, record.peer, record.abort.signal);
@@ -93,8 +96,16 @@ export function createSessionAdapter(ctx, _options = {}) {
         if (!record.clientId) rejectReady(new Error('Harness interaction stream is unavailable'));
       }
     })();
-    await record.ready;
+    // The interaction stream is independent from ordinary session/model RPCs.
+    // Do not hold the first state request on its readiness; only surface a
+    // synchronous startup failure so callers can retry with a fresh peer.
+    await Promise.resolve();
+    if (record.error) throw record.error;
     return record;
+  };
+  const waitForEvents = async record => {
+    try { await record.ready; }
+    catch (error) { throw record.error ?? error; }
   };
   const catalog = async record => {
     const result = await invoke(record, 'session', 'modelCatalog', {});
@@ -178,7 +189,7 @@ export function createSessionAdapter(ctx, _options = {}) {
     requireSession(input.id);
     if (action === 'send') return invoke(record, 'session', 'prompt', { request: { sessionId: input.id, requestId: string(input.requestId, 'request id'), mode: 'queue', content: [{ type: 'text', text: string(input.text, 'text', 20_000) }] } });
     if (action === 'cancel') return invoke(record, 'session', 'cancel', { request: { sessionId: input.id } });
-    if (action === 'respond') return respond(record, input);
+    if (action === 'respond') { await waitForEvents(record); return respond(record, input); }
     const opening = await snapshot(record, input.id);
     let page = opening;
     if (input.before !== undefined) {

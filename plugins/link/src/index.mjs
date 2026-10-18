@@ -2,9 +2,10 @@ import { join } from 'node:path';
 import { hostname } from 'node:os';
 import { openStore, text } from './pairing/store.mjs';
 import { loadIdentity } from './transport/tls.mjs';
-import { listen, localAddresses, authority, validateConfig } from './transport/server.mjs';
+import { listen, connectionAddresses, authority, validateConfig } from './transport/server.mjs';
 import { createSessionAdapter } from './session/adapter.mjs';
 import { createNativeAdapter } from './session/native.mjs';
+import { createWorkbench } from './transport/workbench.mjs';
 
 /** Owner admin uses Harness Connection; remote devices get a distinct TLS carrier. */
 export async function mountLink(ctx, config = {}) {
@@ -19,17 +20,18 @@ export async function mountLink(ctx, config = {}) {
     if (input.action === 'state') result.sessions.push(...native.list());
     return result;
   };
-  let listener, identity, error = '', closed = false, changes = Promise.resolve();
+  let listener, identity, workbench, error = '', closed = false, changes = Promise.resolve();
   const webRoot = config.webRoot ?? new URL('../dist/web/', import.meta.url);
   const start = async () => {
     identity ??= await loadIdentity(directory);
-    listener = await listen({ identity, config: { ...store.state }, webRoot, store, dispatch, onError: e => { error = e.message; } });
+    workbench = createWorkbench(ctx, store, { webRoot, workbenchRoot: config.workbenchRoot });
+    listener = await listen({ identity, config: { ...store.state }, webRoot, store, dispatch, workbench, onError: e => { error = e.message; } });
     error = '';
   };
   const status = () => ({
     enabled: Boolean(listener), host: store.state.host, port: listener?.port ?? store.state.port, publicUrl: store.state.publicUrl,
     hostName: hostname(), error: error || null,
-    addresses: (store.state.host === '0.0.0.0' || store.state.host === '::' ? localAddresses() : [store.state.host]).map(a => `https://${authority(a, listener?.port ?? store.state.port)}`),
+    addresses: connectionAddresses(store.state.host).map(a => `https://${authority(a, listener?.port ?? store.state.port)}`),
     devices: store.state.devices.map(({ tokenHash, ...device }) => device), pending: store.pending(),
   });
   const admin = async input => {
@@ -51,19 +53,20 @@ export async function mountLink(ctx, config = {}) {
       if (!listener) throw new Error('请先启用 Link');
       const mode = input.mode ?? 'lan';
       if (!['lan', 'public'].includes(mode)) throw new Error('连接模式无效');
-      let url = mode === 'public' ? store.state.publicUrl : status().addresses.find(a => !a.includes('[')) ?? status().addresses[0];
-      url ||= `https://127.0.0.1:${listener.port}`;
+      const addresses = status().addresses;
+      let url = mode === 'public' ? store.state.publicUrl : addresses[0];
       if (mode === 'public' && !store.state.publicUrl) throw new Error('请先保存可达的公网 HTTPS 地址');
       if (input.address !== undefined) {
-        if (mode !== 'lan' || !status().addresses.includes(input.address)) throw new Error('局域网地址无效');
+        if (mode !== 'lan' || !addresses.includes(input.address)) throw new Error('局域网地址无效');
         url = input.address;
       }
+      if (!url) throw new Error('未找到可用的连接地址，请检查网络或在高级设置中指定监听地址');
       const pair = store.begin();
       const query = new URLSearchParams({ url, pin: mode === 'lan' ? identity.pin : '', code: pair.code });
       return { ...pair, mode, uri: `dshlink://pair?${query}`, ...(mode === 'public' ? { webUrl: `${url}/link/#code=${encodeURIComponent(pair.code)}` } : {}), url };
     }
     if (action === 'confirm' || action === 'reject') { await store.decide(text(input.id, '设备 ID'), action === 'confirm'); return status(); }
-    if (action === 'revoke') { const id = text(input.id, '设备 ID'); await store.revoke(id); await sessions.revoke(id); return status(); }
+    if (action === 'revoke') { const id = text(input.id, '设备 ID'); await store.revoke(id); await Promise.all([sessions.revoke(id), workbench?.revoke(id)]); return status(); }
     throw new Error('不支持的管理操作');
   };
   const close = async () => {

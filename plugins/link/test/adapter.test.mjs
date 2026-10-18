@@ -65,6 +65,18 @@ test('state lists registered Harness sessions and maps official model catalog', 
   assert.deepEqual(f.calls.find(call => call.method === 'list').args, { _request: {} });
 });
 
+test('state does not wait for a slow interaction stream', async t => {
+  const f = fixture(); t.after(() => f.adapter.close());
+  const open = f.ctx.typertGateway.wireStream.open;
+  f.ctx.typertGateway.wireStream.open = (...args) => new Promise(resolve => {
+    setTimeout(() => resolve(open(...args)), 100);
+  });
+  const started = Date.now();
+  const state = await f.adapter.dispatch({ action: 'state' }, f.device);
+  assert.deepEqual(state.sessions.map(session => session.id), ['session']);
+  assert.ok(Date.now() - started < 80, 'state should not wait for interaction stream readiness');
+});
+
 test('send/cancel use official gateway, rejects foreign sessions and unsupported actions', async t => {
   const f = fixture(); t.after(() => f.adapter.close());
   await f.adapter.dispatch({ action: 'send', id: 'session', requestId: 'request', text: 'hello' }, f.device);

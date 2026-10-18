@@ -10,6 +10,7 @@ class Native extends EventEmitter {
   providers = new Map([['codex', { config: {} }]]);
   records = [];
   sent = [];
+  drivers = new Map();
   interrupted = 0;
   list() { return this.records; }
   snapshot(id) { return this.get(id); }
@@ -18,7 +19,8 @@ class Native extends EventEmitter {
     const record = { ...options, id: `native-${this.records.length}`, status: 'idle', cursor: 0, events: [], receipts: {} };
     this.records.push(record); return record;
   }
-  async connect(id) { this.get(id).status = 'idle'; }
+  async connect(id) { this.get(id).status = 'idle'; this.drivers.set(id, { setModel: async model => { this.get(id).model = model; } }); }
+  async persist() {}
   event(id, type, data, turnId) {
     const record = this.get(id);
     const event = { sessionId: id, type, data, turnId, seq: ++record.cursor };
@@ -65,6 +67,17 @@ test('provider route identity reaches native create and existing conversations c
   assert.equal(s.native.records.length, 1);
   await assert.rejects(collect(s.adapter.stream({ ...request([human('three', 'switch')]), model: encodeRouteModelId('router/b', 'vendor/model') })), /新建聊天/);
   assert.equal(s.native.records.length, 1);
+  await s.dispose();
+});
+test('same tool and supplier can change models on its existing idle native conversation', async () => {
+  const s = setup(), first = encodeRouteModelId('router/a', 'vendor/one'), second = encodeRouteModelId('router/a', 'vendor/two');
+  s.native.pickerCatalog = { models: async () => [first, second].map(id => ({ provider: 'commander-codex', id, name: id, inputModalities: ['text'] })) };
+  await collect(s.adapter.stream({ ...request([human('one', 'hello')]), model: first }));
+  await collect(s.adapter.stream({ ...request([human('two', 'switch')]), model: second }));
+  assert.equal(s.native.records.length, 1);
+  assert.equal(s.native.records[0].model, 'vendor/two');
+  assert.equal(s.native.records[0].route.model, 'vendor/two');
+  await assert.rejects(collect(s.adapter.stream({ ...request([human('three', 'other supplier')]), model: encodeRouteModelId('router/b', 'vendor/three') })), /新建聊天/);
   await s.dispose();
 });
 test('managed picker refuses unsafe new defaults while preserving legacy native sessions', async () => {

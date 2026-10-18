@@ -74,3 +74,21 @@ test('public URL is strict HTTPS and listener settings validate before mutation'
   assert.equal(prior.publicUrl, '');
   assert.equal(validateConfig({ publicUrl: 'https://example.com/' }, prior).publicUrl, 'https://example.com');
 });
+
+test('reverse proxy example keeps workbench streams and uplinks unbuffered', async () => {
+  const config = await readFile(new URL('../config/nginx.example.conf', import.meta.url), 'utf8');
+  for (const directive of [
+    'proxy_http_version 1.1;',
+    'proxy_set_header Connection "";',
+    'proxy_buffering off;',
+    'proxy_request_buffering off;',
+    'proxy_connect_timeout 10s;',
+    'proxy_send_timeout 120s;',
+    'proxy_read_timeout 120s;',
+  ]) assert.match(config, new RegExp(directive.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+test('listener timeouts allow high-latency mobile requests and keep-alive reuse', async t => {
+  const f = await setup(t);
+  assert.deepEqual(f.server.timeouts, { request: 60_000, headers: 15_000, keepAlive: 10_000 });
+});

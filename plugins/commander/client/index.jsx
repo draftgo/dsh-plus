@@ -2,10 +2,12 @@ import { mountLinkSettings } from '../../link/client/app.jsx';
 import { mountShellUi } from './shell-ui.jsx';
 import { projectWorkspaces, recentRows, startSidebarSession, isSidebarSessionSelected, sidebarWorkspaces } from './sidebar-state.mjs';
 import { apply as applyVoice } from '../voice/client/index.jsx';
+import { applyMobileWorkbench } from './mobile-workbench.jsx';
 import { UsageLauncher, UsageDialog, mountUsageStyle } from './usage.jsx';
+import { ThemeLauncher, createThemeSource } from './theme-launcher.jsx';
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import icons from './icons.json';
-import { FishLogo, Tooltip, Modal, Menu } from '@deepseek-ai/dsh-client-ui-primitives';
+import { FishLogo, Tooltip, Modal, Menu, IconPinOutlineRegular, IconPinFillRegular, IconBranchOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives';
 import css from './style.css';
 import fontCss from './fonts.css';
 import { UIIcon } from './iconsax.jsx';
@@ -22,6 +24,13 @@ const states = { idle: '就绪', running: '运行中', connecting: '连接中', 
 const listeners = new Set();
 let defaultWorkspaceId;
 let data = { projects: [], sessions: [], selected: null, projectId: null, error: '', loaded: false };
+const NO_FORK_ACCESS = { getSnapshot: () => false, subscribe: () => () => {} };
+const STATE_TIMEOUT_MS = 45_000;
+const connectionMessage = error => {
+  const message = String(error?.message || error || '');
+  if (error?.name === 'TimeoutError' || /timed out|timeout|failed to fetch|network error|load failed/i.test(message)) return '工作台响应较慢，正在自动重试…';
+  return message;
+};
 function update(patch) { if(patch.projects)patch={...patch,projects:patch.projects.map(project=>({...project,isDefault:project.id===defaultWorkspaceId}))};data = { ...data, ...patch }; for (const fn of listeners) fn(); }
 function useData() { return useSyncExternalStore(fn => { listeners.add(fn); return () => listeners.delete(fn); }, () => data); }
 async function api(action, args = {}, signal) {
@@ -30,7 +39,7 @@ async function api(action, args = {}, signal) {
 }
 let stateSignature;
 async function refresh(signal) {
-  const next = await api('state', {}, AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(20000)]));
+  const next = await api('state', {}, AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(STATE_TIMEOUT_MS)]));
   const signature = JSON.stringify(next);
   if (signature === stateSignature && data.loaded && !data.error) return;
   stateSignature = signature; update({ ...next, loaded: true, error: '' });
@@ -45,18 +54,19 @@ function Activity({ status }) {
 function SessionIcon({ provider, status }) {
   return liveStates.has(status) || status === 'failed' ? <Activity status={status} /> : <Icon provider={provider} size={16} />;
 }
-function SettingsLauncher({ wide, settingsOpen, openSettings, settingsShortcut }) {
+function SettingsLauncher({ wide, settingsOpen, openSettings, settingsShortcut, theme }) {
   const d = useData();
-  return <div className={`cmd-settings-row ${wide ? '' : 'cmd-settings-row-rail'}`}><Tooltip label="设置" side="right" delayMs={450} portal><button type="button" className={`cmd-settings ${wide ? '' : 'cmd-settings-rail'}`} aria-label="设置" aria-haspopup="dialog" aria-expanded={settingsOpen} aria-keyshortcuts={settingsShortcut?.aria} onClick={() => openSettings()}><UIIcon name="settings" size={16} selected={settingsOpen} />{wide && <span>设置</span>}</button></Tooltip><UsageLauncher /><UsageDialog /><Hint label={d.showArchived ? '返回最近对话' : '已归档对话'}><button type="button" className="cmd-archive-launcher" aria-label="查看归档" aria-pressed={!!d.showArchived} disabled={!!d.archiveTransitioning} onClick={() => document.dispatchEvent(new Event('commander:toggle-archive'))}><UIIcon name="archive" size={16} selected={!!d.showArchived} /></button></Hint></div>;
+  return <div className={`cmd-settings-row ${wide ? '' : 'cmd-settings-row-rail'}`}><Tooltip label="设置" side="right" delayMs={450} portal><button type="button" className={`cmd-settings ${wide ? '' : 'cmd-settings-rail'}`} aria-label="设置" aria-haspopup="dialog" aria-expanded={settingsOpen} aria-keyshortcuts={settingsShortcut?.aria} onClick={() => openSettings()}><UIIcon name="settings" size={16} selected={settingsOpen} />{wide && <span>设置</span>}</button></Tooltip><ThemeLauncher theme={theme} /><UsageLauncher /><UsageDialog /><Hint label={d.showArchived ? '返回最近对话' : '已归档对话'}><button type="button" className="cmd-archive-launcher" aria-label="查看归档" aria-pressed={!!d.showArchived} disabled={!!d.archiveTransitioning} onClick={() => document.dispatchEvent(new Event('commander:toggle-archive'))}><UIIcon name="archive" size={16} selected={!!d.showArchived} /></button></Hint></div>;
 }
 function Hint({ label, children }) { return <Tooltip label={label} delayMs={450} portal>{children}</Tooltip>; }
 function ErrorLine({ message }) { return message ? <div className="cmd-error" role="alert">{message}</div> : null; }
 
-export const inject = ['slots', 'layout', 'uiWorkspace', 'uiSession', 'sessions', 'locale', 'remote', 'remote.session', 'workspaces', 'modelDirectories', 'conversation'];
+export const inject = ['slots', 'layout', 'uiWorkspace', 'uiSession', 'sessions', 'locale', 'remote', 'remote.session', 'workspaces', 'modelDirectories', 'conversation', 'theme'];
 export function apply(ctx) {
   applyVoice(ctx);
   mountLinkSettings(ctx);
   mountShellUi(ctx);
+  applyMobileWorkbench(ctx);
   mountUsageStyle(ctx);
   mountModelPicker(ctx);
   mountProviderSettings(ctx);
@@ -64,7 +74,7 @@ export function apply(ctx) {
   ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'harness-tools', order: 32, label: () => 'Harness 工具', inject: () => ({ ctx }) }, ToolSettingsSection));
   const style = document.createElement('style'); style.textContent = fontCss + css; document.head.append(style); ctx.effect(() => () => style.remove());
   void ctx.workspaces.initializeDefault().then(workspace=>{defaultWorkspaceId=workspace?.workspaceId;update({projects:data.projects});}).catch(error=>update({error:error.message}));
-  const stopPolling = startSidebarPolling({ refresh, onError: error => update({ error: error.message }), isActive: () => data.sessions.some(session => liveStates.has(session.status)) });
+  const stopPolling = startSidebarPolling({ refresh, onError: error => update({ error: connectionMessage(error) }), isActive: () => data.sessions.some(session => liveStates.has(session.status)) });
   ctx.effect(() => () => { stopPolling(); stateSignature = undefined; listeners.clear(); });
   const opening = new Map();
   const open = id => {
@@ -94,7 +104,8 @@ export function apply(ctx) {
   ctx.slots.inject('sidebar.brand.name', () => ctx.slots.register({ name: 'sidebar.brand.name', priority: -10 }, () => null));
   for (const name of ['conversation.hero.brand.mark']) ctx.slots.inject(name, () => ctx.slots.register({ name, priority: -10 }, () => null));
   for (const [id, name] of [['plugins','plugins'], ['schedules','schedules']]) ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id, priority: -10, order: id === 'plugins' ? 0 : 10, label: () => id === 'plugins' ? '插件' : '自动化任务' }, ({ active }) => <UIIcon name={name} size={16} selected={active} />));
-  ctx.slots.inject('settings.launcher', () => ctx.slots.register({ name: 'settings.launcher', priority: -10 }, SettingsLauncher));
+  const theme = createThemeSource(ctx);
+  ctx.slots.inject('settings.launcher', () => ctx.slots.register({ name: 'settings.launcher', priority: -10, inject: () => ({ theme }) }, SettingsLauncher));
   ctx.slots.inject('sidebar.workspaces', () => ctx.slots.register({ name: 'sidebar.workspaces', priority: -10, inject: () => ({ host: ctx, open, newSession }) }, Projects));
 }
 
@@ -119,6 +130,7 @@ function Projects({ host, open, newSession, expandSidebar, wide = true }) {
     return next;
   });
   const [adding, setAdding] = useState(false), [error, setError] = useState('');
+  const [renameTarget, setRenameTarget] = useState(null);
   const [filter, setFilter] = useState(''), [searching, setSearching] = useState(false), [showArchived, setShowArchived] = useState(false);
   const [expanded, setExpanded] = useState({});
   const [archivePhase, setArchivePhase] = useState('idle');
@@ -149,7 +161,8 @@ function Projects({ host, open, newSession, expandSidebar, wide = true }) {
   const rows = [
     ...d.sessions.filter(s => (!harness.byId[s.ownerSessionId] || (s.parentId && !s.harnessAdopted)) && (s.title || ['running', 'waiting', 'connecting', 'failed'].includes(s.status)) && (showArchived ? s.archived : !s.archived)).map(s => ({ ...s, native: true })),
     ...workspaceProjects.flatMap(p => p.sessionIds.filter(id => harness.byId[id] && !harness.byId[id].blank && !(d.deletedHarnessIds ?? []).includes(id) && archivedIds.has(id) === showArchived).map(id => ({ id, archived: archivedIds.has(id), nativeId: nativeFor(id)?.id, projectId: p.id, title: harness.byId[id].displayTitle || harness.byId[id].title || '新对话', provider: nativeFor(id)?.provider ?? 'deepseek', model: nativeFor(id)?.model, status: statuses.get(id)?.pendingInteraction || nativeFor(id)?.status === 'waiting' ? 'waiting' : nativeFor(id)?.status === 'failed' ? 'failed' : (statuses.get(id)?.running ?? harness.byId[id].running) ? 'running' : nativeFor(id)?.status, updatedAt: harness.byId[id].updatedAt }))),
-  ].filter(matches).sort((a, b) => (Number(b.updatedAt) || Date.parse(b.updatedAt) || 0) - (Number(a.updatedAt) || Date.parse(a.updatedAt) || 0));
+  ].filter(matches).sort((a, b) => Number(workspaces.pinnedSessionIds?.includes(b.id) ?? false) - Number(workspaces.pinnedSessionIds?.includes(a.id) ?? false)
+    || (Number(b.updatedAt) || Date.parse(b.updatedAt) || 0) - (Number(a.updatedAt) || Date.parse(a.updatedAt) || 0));
   // Global activity includes hidden/collapsed projects and every native delegate.
   const live = [
     ...d.sessions.filter(s => !s.archived && liveStates.has(s.status)).map(s => ({ ...s, native: true })),
@@ -158,6 +171,9 @@ function Projects({ host, open, newSession, expandSidebar, wide = true }) {
   const projects = projectWorkspaces(workspaceProjects);
   const recents = recentRows(rows, workspaceProjects);
   const tools = [...new Set(live.map(s => s.provider))].map(provider => ({ provider, sessions: live.filter(s => s.provider === provider) }));
+  const currentActionSession = actionSession && (rows.find(session => session.id === actionSession.id) || actionSession);
+  const forkAccess = host.get?.('remoteAccess')?.source('session', currentActionSession?.id || '', 'session/fork') || NO_FORK_ACCESS;
+  const canFork = useSyncExternalStore(forkAccess.subscribe, forkAccess.getSnapshot, forkAccess.getSnapshot);
   const operate = async (s, action) => {
     setBusy(true); setError('');
     try {
@@ -204,27 +220,69 @@ function Projects({ host, open, newSession, expandSidebar, wide = true }) {
     <div id="cmd-recent-section" className="cmd-section-body" data-open={!wide || sections.recent} inert={wide && !sections.recent ? '' : undefined}><div className="cmd-section-inner"><div className="cmd-recents" data-transition={archivePhase}>{recents.map(row)}{wide && d.loaded && !recents.length && <p className="cmd-sidebar-empty">{filter ? '没有找到对话' : showArchived ? '暂无归档对话' : '发送第一条消息，开始对话'}</p>}</div></div></div>
     </div>
     <Menu open={!!actionSession} onClose={() => { if(!busy)setActionSession(null); }} anchor={null} getAnchorRect={() => actionAnchor.current?.getBoundingClientRect() ?? null} side="right" align="end" portal autoFocus compact listClassName="cmd-actions-popover">
-      {actionSession && <>
-        <div className="cmd-session-details"><Icon provider={actionSession.provider} size={16} /><span>{names[actionSession.provider] || actionSession.provider}{actionSession.model ? ' · ' + actionSession.model : ''}</span></div>
+      {currentActionSession && <>
+        <div className="cmd-session-details"><Icon provider={currentActionSession.provider} size={16} /><span>{names[currentActionSession.provider] || currentActionSession.provider}{currentActionSession.model ? ' · ' + currentActionSession.model : ''}</span></div>
         <div className="cmd-session-actions">
+          {!currentActionSession.native && !showArchived && <button type="button" role="menuitem" disabled={busy} onClick={async () => {
+            setBusy(true); setError('');
+            try {
+              const pinned = workspaces.pinnedSessionIds?.includes(currentActionSession.id);
+              if (pinned) await host.uiWorkspace.unpinSession(currentActionSession.id);
+              else await host.uiWorkspace.pinSession(currentActionSession.id);
+              setActionSession(null);
+            } catch (e) { setError(e.message); }
+            finally { setBusy(false); }
+          }}>{workspaces.pinnedSessionIds?.includes(currentActionSession.id) ? <IconPinFillRegular size={16} /> : <IconPinOutlineRegular size={16} />}<span>{workspaces.pinnedSessionIds?.includes(currentActionSession.id) ? '取消置顶' : '置顶会话'}</span></button>}
+          {!currentActionSession.native && <button type="button" role="menuitem" disabled={busy} onClick={() => {
+            setRenameTarget(currentActionSession); setActionSession(null); setError('');
+          }}><UIIcon name="edit" size={16} /><span>重命名</span></button>}
+          {!currentActionSession.native && canFork && <button type="button" role="menuitem" disabled={busy || ['running', 'waiting', 'connecting', 'stopping'].includes(currentActionSession.status)} onClick={async () => {
+            setBusy(true); setError('');
+            try { await host.uiWorkspace.forkSession(currentActionSession.id, undefined, { allowMigration: false }); setActionSession(null); }
+            catch (e) { setError(e.message); }
+            finally { setBusy(false); }
+          }}><IconBranchOutlineRegular size={16} /><span>分叉会话</span></button>}
+          <div className="cmd-session-action-divider" role="separator" />
+          <button type="button" role="menuitem" disabled={busy} onClick={() => void operate(currentActionSession, 'archive')}><UIIcon name="archive" size={16} /><span>{showArchived ? '取消归档' : '归档对话'}</span></button>
+          <div className="cmd-session-action-divider" role="separator" />
           <button type="button" role="menuitem" disabled={busy} onClick={async () => {
             setBusy(true); setCopyStatus('');
             try {
-              const current = data.sessions.find(item => item.id === (actionSession.native ? actionSession.id : actionSession.nativeId));
-              const project = workspaceProjects.find(item => item.id === actionSession.projectId);
-              await copyConversationInfo(conversationInfo(actionSession, current, project));
+              const current = data.sessions.find(item => item.id === (currentActionSession.native ? currentActionSession.id : currentActionSession.nativeId));
+              const project = workspaceProjects.find(item => item.id === currentActionSession.projectId);
+              await copyConversationInfo(conversationInfo(currentActionSession, current, project));
               setCopyStatus('已复制完整会话信息');
             } catch { setCopyStatus('复制失败，请手动复制下方信息'); }
             finally { setBusy(false); }
           }}><UIIcon name="link" size={16} /><span>复制对话 ID</span></button>
-          <button type="button" role="menuitem" disabled={busy} onClick={() => void operate(actionSession, 'archive')}><UIIcon name="archive" size={16} /><span>{showArchived ? '取消归档' : '归档对话'}</span></button>
           <button type="button" role="menuitem" className="cmd-danger" disabled={busy} onClick={() => { setConfirmDelete(actionSession); setActionSession(null); }}><UIIcon name="trash" size={16} /><span>删除对话</span></button>
         </div>
         {copyStatus && <p className="cmd-copy-status" role="status">{copyStatus}</p>}
-        {copyStatus.startsWith('复制失败') && <textarea className="cmd-copy-fallback" aria-label="完整会话信息" readOnly value={JSON.stringify(conversationInfo(actionSession, data.sessions.find(item => item.id === (actionSession.native ? actionSession.id : actionSession.nativeId)), workspaceProjects.find(item => item.id === actionSession.projectId)), null, 2)} onFocus={event => event.target.select()} />}
+        {copyStatus.startsWith('复制失败') && <textarea className="cmd-copy-fallback" aria-label="完整会话信息" readOnly value={JSON.stringify(conversationInfo(currentActionSession, data.sessions.find(item => item.id === (currentActionSession.native ? currentActionSession.id : currentActionSession.nativeId)), workspaceProjects.find(item => item.id === currentActionSession.projectId)), null, 2)} onFocus={event => event.target.select()} />}
         <ErrorLine message={error} />
       </>}
     </Menu>
+    <SessionRenameDialog target={renameTarget} host={host} onClose={() => setRenameTarget(null)} onRenamed={refresh} />
     <Modal open={!!confirmDelete} onClose={() => { if(!busy)setConfirmDelete(null); }} title="删除这条对话？" closeLabel="关闭" description="从对话列表移除，并释放 Commander 管理记录。服务器日志、原生工具历史和项目文件会保留。" footer={<><button className="cmd-dialog-button" disabled={busy} onClick={() => setConfirmDelete(null)}>取消</button><button className="cmd-dialog-button cmd-danger" disabled={busy} onClick={() => void operate(confirmDelete, 'delete')}>{busy ? '删除中…' : '删除对话'}</button></>}><ErrorLine message={error} /></Modal>
   </section>;
+}
+
+function SessionRenameDialog({ target, host, onClose, onRenamed }) {
+  const [title, setTitle] = useState(target?.title || ''), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  useEffect(() => { setTitle(target?.title || ''); setError(''); }, [target?.id]);
+  const submit = async event => {
+    event?.preventDefault();
+    const nextTitle = title.trim();
+    if (!target || !nextTitle || busy) return;
+    setBusy(true); setError('');
+    try {
+      const result = await host.sessions.using(target.id, { source: 'workspaceOperation' }, reference => reference.binding.session.rename(nextTitle));
+      if (!result.ok) throw new Error(result.error.message);
+      await onRenamed(); onClose();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setBusy(false); }
+  };
+  return <Modal open={!!target} onClose={() => { if (!busy) onClose(); }} title="重命名会话" closeLabel="关闭" footer={<><button className="cmd-dialog-button" disabled={busy} onClick={onClose}>取消</button><button className="cmd-dialog-button cmd-dialog-primary" disabled={busy || !title.trim()} onClick={submit}>{busy ? '保存中…' : '保存'}</button></>}>
+    <form className="cmd-rename-form" onSubmit={submit}><label htmlFor="cmd-session-rename">会话名称</label><input id="cmd-session-rename" autoFocus value={title} disabled={busy} onChange={event => setTitle(event.target.value)} /><ErrorLine message={error} /></form>
+  </Modal>;
 }

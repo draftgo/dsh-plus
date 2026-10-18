@@ -8,6 +8,10 @@ export function availableTools(catalog) {
   })];
 }
 export function currentToolId(provider) { return typeof provider === 'string' && provider.startsWith('commander-') ? provider.slice('commander-'.length) : 'deepseek'; }
+export function providerAllowsTool(provider, tool) {
+  if (!provider || provider.authMode !== 'subscription') return true;
+  return list(provider.harnessTools).includes(tool);
+}
 /** Retain a prior choice only while the exact model still advertises it. */
 export function selectionReasoningEffort(provider, model, current, requested) {
   const supported = effort => model.reasoning?.efforts?.some(entry => entry.id === effort);
@@ -29,6 +33,8 @@ export function providersForTool(groups, catalog, tool) {
   for (const group of list(groups)) {
     if (tool === 'deepseek') {
       if (group.id.startsWith('commander-')) continue;
+      const identity = list(catalog?.providers).find(provider => provider.id === group.id);
+      if (!providerAllowsTool(identity, tool) || Array.isArray(identity?.tools) && !identity.tools.includes(tool)) continue;
       for (const model of list(group.models)) add(group.id, group.name, group, model, model.id);
       if (!list(group.models).length) result.set(group.id, { id: group.id, name: group.name || group.id, models: [] });
     } else if (group.id === 'commander-' + tool) {
@@ -38,8 +44,11 @@ export function providersForTool(groups, catalog, tool) {
       }
     }
   }
+  for (const identity of list(catalog?.providers).filter(provider => provider.nativeRequired && providerAllowsTool(provider, tool))) {
+    if (!result.has(identity.id)) result.set(identity.id, { id: identity.id, name: identity.name || identity.id, models: [] });
+  }
   return [...result.values()].map(entry => {
     const identity = list(catalog?.providers).find(provider => provider.id === entry.id);
-    return identity?.declared === true ? { ...entry, declared: true } : entry;
+    return { ...entry, ...(identity?.declared === true ? { declared: true } : {}), ...(identity?.authMode === 'subscription' ? { authMode: identity.authMode, harnessTools: identity.harnessTools, nativeRequired: identity.nativeRequired, configured: identity.configured, routeReason: identity.routeReason } : {}) };
   });
 }

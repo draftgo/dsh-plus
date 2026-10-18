@@ -108,6 +108,7 @@ export class OpenCodeProvider {
       })();
       return {
         nativeId: info.id,
+        async setModel(model) { session.model = model || undefined; },
         async commands() { return commandCatalog(await request('/command'), [compactCommand, { ...compactCommand, name: 'summarize' }]); },
         validateCommand({ name, arguments: args }) {
           if (name !== 'compact' && name !== 'summarize') return;

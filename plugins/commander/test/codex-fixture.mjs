@@ -12,6 +12,7 @@ createInterface({ input: process.stdin }).on('line', line => {
     return;
   }
   switch (m.method) {
+    case 'account/read': result({ account: { type: process.env.COMMANDER_TEST_ACCOUNT_TYPE || 'chatgpt', planType: 'plus' }, requiresOpenaiAuth: true }); break;
     case 'initialize': result({ userAgent: 'codex/fixture' }); break;
     case 'thread/start': case 'thread/resume': result({ thread: { id: m.params.threadId ?? 'thread-fixture' } }); break;
     case 'thread/read': result({ thread: { id: 'thread-fixture', turns: [] } }); break;

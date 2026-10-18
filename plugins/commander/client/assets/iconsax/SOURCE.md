@@ -5,6 +5,8 @@ Vendored source: iconsax-react 0.0.8, https://registry.npmjs.org/iconsax-react/-
 Repository: https://github.com/rendinjast/iconsax-react
 License: MIT, Copyright ERFAN KHADIVAR (see LICENSE).
 
-Only 18 selected symbols, Linear and Bold variants, are extracted as SVG assets.
+23 selected symbols, Linear and Bold variants, are extracted as SVG assets.
+Link controls additionally use Scan (scan), Refresh (refresh), Copy (copy)
+and CloseCircle (close) from the same iconsax-react 0.0.8 release.
 No runtime package dependency or CDN requests. catalog.json is the same asset content used for bundling.
 Brand marks for Codex, Claude, Pi and OpenCode are kept distinct from interface icons.

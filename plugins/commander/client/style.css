@@ -242,6 +242,12 @@
 .cmd-session-actions button:active { transform: scale(.99); }
 .cmd-session-actions button:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, #8a8a8a); outline-offset: -2px; }
 .cmd-session-actions button:disabled { opacity: .45; cursor: default; }
+.cmd-session-actions .cmd-session-action-divider { height: 1px; margin: 5px 8px; background: var(--dsw-alias-border-l2, #8882); }
+.cmd-rename-form { display: grid; gap: 8px; min-width: min(320px, calc(100vw - 56px)); }
+.cmd-rename-form label { color: var(--dsw-alias-label-secondary, #818181); font-size: 12px; }
+.cmd-rename-form input { box-sizing: border-box; width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-l2, #8882); border-radius: 8px; background: transparent; color: var(--dsw-alias-label-primary, inherit); font: inherit; }
+.cmd-rename-form input:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, #8a8a8a); outline-offset: 1px; }
+.cmd-dialog-primary { background: var(--dsw-alias-state-business-primary, #4d6bfe); border-color: transparent; color: #fff; }
 .cmd-copy-status { margin: 12px 0 0; font-size: 12px; color: var(--dsw-alias-label-secondary, #818181); }
 .cmd-copy-fallback { width: 100%; min-height: 140px; margin-top: 10px; padding: 10px; box-sizing: border-box; border: 1px solid var(--dsw-alias-border-l3, #88888825); border-radius: 8px; resize: vertical; background: var(--dsw-alias-interactive-bg-hover, #88888812); color: inherit; font: 12px/1.6 var(--ds-font-family-code, monospace); }
 
@@ -275,10 +281,10 @@
 .cmd-archive-launcher:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, #888); outline-offset: -2px; }
 .cmd-archive-launcher:disabled { opacity: .45; cursor: default; }
 .cmd-settings-row-rail { flex-direction: column; }
-.cmd-actions-popover { width: 236px; max-width: calc(100vw - 24px); color: var(--dsw-alias-label-primary); font-family: inherit; }
+.cmd-actions-popover { width: 270px; max-width: calc(100vw - 24px); color: var(--dsw-alias-label-primary); font-family: inherit; }
 .cmd-actions-popover .cmd-session-details { padding: 10px 12px 8px; margin: 0; }
 .cmd-actions-popover .cmd-session-actions { gap: 2px; }
-.cmd-actions-popover .cmd-session-actions button { min-height: 36px; padding: 8px 10px; font-size: 12px; }
+.cmd-actions-popover .cmd-session-actions button { min-height: 42px; padding: 10px 12px; font-size: 13px; }
 .cmd-actions-popover .cmd-copy-status { padding: 0 10px 8px; font-size: 11px; }
 .cmd-actions-popover .cmd-error { margin: 6px; }
 .cmd-actions-popover .cmd-copy-fallback { width: calc(100% - 12px); margin: 6px; }

@@ -3,6 +3,8 @@ import { ToolInstaller } from './tool-install.mjs';
 import { createToolProfiles } from './tool-profiles.mjs';
 import { createSessionRoutes } from './session-routes.mjs';
 import { createPickerCatalog } from './picker-catalog.mjs';
+import { assertProviderToolAccess } from './provider-access.mjs';
+import { createNativeAuth } from './native-auth.mjs';
 import { assertSameOrigin } from '../voice/src/web.mjs';
 import { readLimited } from '../voice/src/media.mjs';
 
@@ -11,20 +13,36 @@ export async function mountTooling(ctx, commander, providers, options = {}) {
   const busy = tool => [...commander.sessions.values()].some(session => session.provider === tool &&
     (commander.drivers.has(session.id) || commander.connecting.has(session.id) || ['running', 'connecting', 'waiting'].includes(session.status)));
   const installer = options.installer ?? new ToolInstaller({ root: join(commander.store.directory, 'tools'), isRunning: busy });
+  providers.setNativeAuth?.(createNativeAuth({ installer }));
   const profiles = options.profiles ?? createToolProfiles({ directory: commander.store.directory, providers });
   commander.toolInstaller = installer; commander.toolProfiles = profiles;
   const routeService = createSessionRoutes({ directory: commander.store.directory, providers, profiles });
   const pickerCatalog = createPickerCatalog({ commander, installer, profiles, providers, routeService, llm: ctx.llm });
   commander.routeService = routeService; commander.pickerCatalog = pickerCatalog;
+  // Direct official provider selections must obey the same subscription boundary
+  // as opaque native routes, including auxiliary requests and stored selections.
+  if (ctx.on && providers.describeAccess) ctx.on('llm/stream', async function* (options, next) {
+    if (!options.provider?.startsWith('commander-') && ctx.llm?.listConfigurableProviders?.().some(entry => entry.provider === options.provider)) {
+      const access = await providers.describeAccess(options.provider);
+      try { assertProviderToolAccess(access, 'harness'); }
+      catch (error) {
+        yield { type: 'finish', reason: { kind: 'error', failure: { code: error.code, message: error.message + ' 请在模型菜单中选择对应的 Harness 工具。' } } };
+        return;
+      }
+    }
+    yield* next();
+  });
   const dispatch = async (input, signal) => {
     switch (input.action) {
       case 'pickerCatalog': return pickerCatalog.list();
-      case 'catalog': return { tools: (await installer.list()).map(tool => ({ ...tool, routeSupported: routeService.supports(tool.id).supported, routeReason: routeService.supports(tool.id).reason })), ...await profiles.list() };
+      case 'catalog': return { tools: (await installer.list()).map(tool => ({ ...tool, routeSupported: routeService.supports(tool.id).supported, routeReason: routeService.supports(tool.id).reason })), ...await profiles.list(), providerAccess: await providers.accessList?.() ?? [] };
       case 'profiles': return profiles.list();
       case 'providers': return { providers: await providers.list() };
       case 'models': return { models: await providers.models(input.providerId, signal) };
       case 'job': return { job: installer.job(input.id) };
       case 'install': return { job: installer.install(input.tool) };
+      case 'update': return { job: installer.updateTool(input.tool) };
+      case 'reinstall': return { job: installer.reinstall(input.tool) };
       case 'uninstall': return { job: installer.uninstall(input.tool) };
       case 'cancel': return { job: installer.cancel(input.id) };
       case 'setDefault': {

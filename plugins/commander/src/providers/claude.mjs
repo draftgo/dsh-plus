@@ -28,6 +28,11 @@ export class ClaudeProvider {
     }
     const driver = {
       nativeId: session.nativeId,
+      async setModel(model) {
+        if (typeof query.setModel !== 'function') throw new Error('Claude Agent SDK does not support changing models in this session');
+        await query.setModel(model || undefined);
+        session.model = model || undefined;
+      },
       async submit(text) {
         hasAssistantText = false;
         queue.push({ type: 'user', session_id: driver.nativeId ?? '', message: { role: 'user', content: text }, parent_tool_use_id: null });
@@ -94,6 +99,10 @@ export class ClaudeProvider {
         query.initializationResult(),
         new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Claude initialization timed out')), 30_000); }),
       ]);
+      if (this.config.managedProfile?.subscription) {
+        const account = await query.accountInfo();
+        if (!account?.subscriptionType || account.subscriptionType === 'none' || account.apiKeySource && account.apiKeySource !== 'none' || account.apiProvider && account.apiProvider !== 'firstParty') throw new Error('请先在本机 Claude Code 中完成 Claude 订阅登录，不能用 API 密钥替代订阅。');
+      }
     } catch (error) { await driver.close(); throw error; }
     finally { clearTimeout(timer); }
     driver.history = async () => {

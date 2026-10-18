@@ -7,4 +7,14 @@
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowBackground">#0b0e14</item>
     </style>
+    <style name="Theme.DshPlus.Scanner" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#1A1A1A</item>
+        <item name="colorAccent">#1A1A1A</item>
+        <item name="android:windowBackground">#F7F7F5</item>
+        <item name="android:statusBarColor">#F7F7F5</item>
+        <item name="android:navigationBarColor">#F7F7F5</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
 </resources>

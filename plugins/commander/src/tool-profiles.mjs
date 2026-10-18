@@ -3,6 +3,9 @@ import { join, dirname, resolve, parse } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { ToolConfigError, TOOL_IDS, toolId, toolCapabilities, nativeConfigFiles, nativePatches, parseConfig, renderConfig, validateObject } from './tool-config.mjs';
 
+import { validateQuickSettings } from '../shared/tool-quick-settings.mjs';
+import { assertProviderToolAccess } from './provider-access.mjs';
+
 const hash = value => createHash('sha256').update(value).digest('hex');
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const text = (value, label) => { if (typeof value !== 'string' || !value.trim() || value.length > 512 || /[\u0000-\u001f]/u.test(value)) throw new ToolConfigError('无效的' + label); return value.trim(); };
@@ -19,11 +22,20 @@ export function createToolProfiles({ directory, providers, ...paths }) {
   const exclusive = operation => { const result = queue.then(async () => { await mkdir(directory, { recursive: true, mode: 0o700 }); const lock = join(directory, '.tool-profiles.lock'); try { await mkdir(lock, { mode: 0o700 }); } catch (e) { if (e.code === 'EEXIST') throw new ToolConfigError('工具配置正在由其他操作更新，请稍后重试', 409); throw e; } try { return await operation(); } finally { await rm(lock, { recursive: true, force: true }); } }); queue = result.catch(() => {}); return result; };
   const state = async () => { const raw = await read(storePath); if (!raw) return { version: 1, profiles: {}, bindings: {}, backups: [] }; try { const data = JSON.parse(raw); if (data.version !== 1 || !object(data.profiles) || !object(data.bindings) || !Array.isArray(data.backups)) throw Error(); validateObject(data); return data; } catch { throw new ToolConfigError('工具配置存储损坏，原文件已保留', 409); } };
   const persist = data => atomic(storePath, JSON.stringify(data, null, 2) + '\n');
+  const checkAccess = async (providerId, tool) => assertProviderToolAccess(await providers.describeAccess?.(providerId), tool);
+  const nativeStatus = async () => Promise.all(TOOL_IDS.map(async tool => {
+    const files = await Promise.all(nativeConfigFiles(tool, paths).map(async spec => {
+      try { await safePath(spec.path); const info = await lstat(spec.path); return { ...spec, exists: info.isFile() }; }
+      catch (error) { return { ...spec, exists: false, ...(error.code !== 'ENOENT' ? { unavailable: true } : {}) }; }
+    }));
+    return { tool, files, hasConfiguration: files.some(file => file.exists) };
+  }));
   const sanitize = profile => profile ? structuredClone(profile) : null;
   const build = async (input, data) => {
     const tool = toolId(input.tool), profile = data.profiles[tool]; if (!profile) throw new ToolConfigError('请先保存工具配置', 409);
     if (input.revision && input.revision !== profile.revision) throw new ToolConfigError('工具方案已变更，请重新预览', 409);
     if (data.bindings[profile.providerId] && !data.bindings[profile.providerId].includes(tool)) throw new ToolConfigError('此供应商未绑定当前工具', 409);
+    await checkAccess(profile.providerId, tool);
     const provider = await providers.resolve(profile.providerId);
     let address; try { address = new URL(provider.baseURL); } catch { throw new ToolConfigError('供应商地址无效'); }
     if (!['http:', 'https:'].includes(address.protocol) || address.username || address.password || address.search || address.hash || typeof provider.apiKey !== 'string' || !provider.apiKey || /[\r\n\u0000]/u.test(provider.apiKey)) throw new ToolConfigError('供应商连接配置无效');
@@ -55,38 +67,43 @@ export function createToolProfiles({ directory, providers, ...paths }) {
     return { tool, backupId: id, files: files.map(x => ({ path: x.path, checksum: x.after === null ? null : hash(x.after) })), warnings: [] };
   }
   return {
-    async list() { const data = await state(); return { profiles: Object.values(data.profiles).map(sanitize), applied: Object.values(data.applied || {}).map(sanitize), backups: data.backups.map(x => structuredClone(x)), capabilities: toolCapabilities(), bindings: structuredClone(data.bindings), defaults: Object.values(data.defaults || {}).map(sanitize) }; },
+    async list({ includeNative = true } = {}) { const data = await state(); return { profiles: Object.values(data.profiles).map(sanitize), applied: Object.values(data.applied || {}).map(sanitize), backups: data.backups.map(x => structuredClone(x)), capabilities: toolCapabilities(), ...(includeNative ? { native: await nativeStatus() } : {}), bindings: structuredClone(data.bindings), defaults: Object.values(data.defaults || {}).map(sanitize) }; },
     async get(tool) { return sanitize((await state()).profiles[toolId(tool)]); },
     async runtime(tool) {
       tool = toolId(tool); const data = await state(), profile = data.applied?.[tool]; if (!profile) return { configured: false, env: {} };
       if (data.bindings[profile.providerId] && !data.bindings[profile.providerId].includes(tool)) throw new ToolConfigError('此供应商未绑定当前工具', 409);
+      await checkAccess(profile.providerId, tool);
       const { baseURL, apiKey } = await providers.resolve(profile.providerId);
       const env = tool === 'claude' ? { ANTHROPIC_BASE_URL: baseURL, ANTHROPIC_API_KEY: apiKey, ANTHROPIC_AUTH_TOKEN: apiKey, ANTHROPIC_MODEL: profile.model } : tool === 'gemini' ? { GEMINI_API_KEY: apiKey, GOOGLE_GEMINI_BASE_URL: baseURL, GEMINI_MODEL: profile.model } : {};
       return { configured: true, providerId: profile.providerId, model: profile.model, provider: ['pi', 'opencode'].includes(tool) ? 'dsh-plus' : undefined, env };
     },
-    setBindings(input) { return exclusive(async () => { const data = await state(), providerId = text(input.providerId, '供应商'); await providers.resolve(providerId); if (!Array.isArray(input.tools) || input.tools.length > TOOL_IDS.length + 1) throw new ToolConfigError('无效的工具绑定'); data.bindings[providerId] = [...new Set(input.tools.map(id => id === 'harness' ? id : toolId(id)))]; await persist(data); return { bindings: structuredClone(data.bindings) }; }); },
+    setBindings(input) { return exclusive(async () => { const data = await state(), providerId = text(input.providerId, '供应商'); if (!Array.isArray(input.tools) || input.tools.length > TOOL_IDS.length + 1) throw new ToolConfigError('无效的工具绑定'); const tools = [...new Set(input.tools.map(id => id === 'harness' ? id : toolId(id)))]; for (const tool of tools) await checkAccess(providerId, tool); if (!providers.describeAccess) await providers.resolve(providerId); else await providers.describeAccess(providerId); data.bindings[providerId] = tools; await persist(data); return { bindings: structuredClone(data.bindings) }; }); },
     save(input) { return exclusive(async () => {
       const data = await state(), tool = toolId(input.tool), providerId = text(input.providerId, '供应商'), model = text(input.model, '模型'), overrides = input.overrides || {};
       if (!object(overrides) || JSON.stringify(overrides).length > 256 * 1024) throw new ToolConfigError('高级配置须为 JSON 对象且不超过 256 KiB'); validateObject(overrides, { overrides: true });
       if (input.expectedRevision && input.expectedRevision !== data.profiles[tool]?.revision) throw new ToolConfigError('工具方案被修改，请刷新', 409);
       const capability = toolCapabilities().find(x => x.tool === tool), protocol = input.protocol || capability.protocols[0]; if (!capability.protocols.includes(protocol)) throw new ToolConfigError('工具不支持此协议');
       if (input.contextWindow !== undefined && (!Number.isSafeInteger(input.contextWindow) || input.contextWindow <= 0)) throw new ToolConfigError('上下文窗口须为正整数');
+      await checkAccess(providerId, tool);
+      const quickSettings = validateQuickSettings(tool, input.quickSettings ?? data.profiles[tool]?.quickSettings ?? {});
       const provider = await providers.resolve(providerId); if (JSON.stringify(overrides).includes(provider.apiKey)) throw new ToolConfigError('高级配置不能包含供应商密钥');
       if (data.bindings[providerId] && !data.bindings[providerId].includes(tool)) throw new ToolConfigError('此供应商未绑定当前工具', 409);
-      const profile = { tool, providerId, model, protocol, overrides: structuredClone(overrides), ...(input.contextWindow ? { contextWindow: input.contextWindow } : {}), revision: randomUUID(), updatedAt: new Date().toISOString() };
+      const profile = { tool, providerId, model, protocol, quickSettings, overrides: structuredClone(overrides), ...(input.contextWindow ? { contextWindow: input.contextWindow } : {}), revision: randomUUID(), updatedAt: new Date().toISOString() };
       data.profiles[tool] = profile; await persist(data); return sanitize(profile);
     }); },
     setDefault(input) { return exclusive(async () => {
       const data = await state(), tool = toolId(input.tool), profile = data.profiles[tool];
       if (!profile || input.revision !== profile.revision) throw new ToolConfigError('工具方案已变更，请刷新后保存默认', 409);
       if (data.bindings[profile.providerId] && !data.bindings[profile.providerId].includes(tool)) throw new ToolConfigError('此供应商未绑定当前工具', 409);
+      await checkAccess(profile.providerId, tool);
       await providers.resolve(profile.providerId);
       data.defaults ??= {}; data.defaults[tool] = structuredClone(profile); await persist(data);
       return { profile: sanitize(profile) };
     }); },
     async preview(input) { const result = await build(input, await state()); return { tool: result.tool, revision: result.profile.revision, files: publicFiles(result.files), warnings: result.warnings }; },
-    apply(input) { return exclusive(async () => { const data = await state(), result = await build(input, data); if (input.checksums) for (const item of result.files) if (!Object.hasOwn(input.checksums, item.path) || input.checksums[item.path] !== item.checksum) throw new ToolConfigError('原生配置已变更，请重新预览', 409); const applied = await transact(data, result.tool, result.files, undefined, result.profile); return { ...applied, warnings: result.warnings }; }); },
+    apply(input) { return exclusive(async () => { if (input.confirmNativeWrite !== true) throw new ToolConfigError('同步本机配置需要显式确认', 409); if (!input.revision || !object(input.checksums)) throw new ToolConfigError('请先预览并确认配置文件版本', 409); const data = await state(), result = await build(input, data); if (input.checksums) for (const item of result.files) if (!Object.hasOwn(input.checksums, item.path) || input.checksums[item.path] !== item.checksum) throw new ToolConfigError('原生配置已变更，请重新预览', 409); const applied = await transact(data, result.tool, result.files, undefined, result.profile); return { ...applied, warnings: result.warnings }; }); },
     restore(input) { return exclusive(async () => {
+      if (input.confirmNativeWrite !== true) throw new ToolConfigError('恢复本机配置需要显式确认', 409);
       const data = await state(), info = data.backups.find(x => x.id === input.backupId); if (!info || !/^[a-f0-9-]{36}$/u.test(info.id)) throw new ToolConfigError('备份不存在', 404);
       const backup = JSON.parse(await read(join(backupDir, info.id + '.json'))), allowed = new Set(nativeConfigFiles(info.tool, paths).map(x => x.path)), files = [];
       for (const item of backup.files) { if (!allowed.has(item.path)) throw new ToolConfigError('备份目标与当前工具路径不一致', 409); const before = await read(item.path), checksum = before === null ? null : hash(before); if (checksum !== item.afterChecksum || input.checksums && input.checksums[item.path] !== checksum) throw new ToolConfigError('原生配置在备份后已变更，拒绝覆盖；请先另存并手动合并', 409); files.push({ path: item.path, before, after: item.before }); }

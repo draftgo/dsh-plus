@@ -32,15 +32,19 @@ test('catalog is fixed and aliases cannot become commands or paths', () => {
   assert.equal(TOOL_CATALOG.length, 10); assert.equal(normalizeToolId('grokbuild'), 'grok'); assert.equal(normalizeToolId('minimax'), 'mcode');
   for (const id of ['../codex', 'codex;curl evil', '__proto__', null]) assert.throws(() => normalizeToolId(id));
 });
-test('managed npm install validates binary, resolves before PATH and uninstalls only prefix', async t => {
+test('managed npm install validates its binary, preserves system preference and uninstalls only prefix', async t => {
   const { manager, calls, dir } = await fixture(t);
-  assert.match(await manager.resolveExecutable('codex'), /bin.codex$/);
+  const system = await manager.resolveExecutable('codex'); assert.match(system, /bin.codex$/);
   const config = join(dir, 'user-config.json'); await writeFile(config, '{"keep":true}');
   const job = manager.install('codex'); assert.equal(job.status, 'queued'); assert.throws(() => manager.install('codex'), /进行中/);
   assert.equal((await done(manager, job.id)).status, 'succeeded');
-  assert.equal(await manager.resolveExecutable('codex'), manager.managedExecutable('codex'));
+  assert.equal(await manager.resolveExecutable('codex'), system);
   assert.ok(calls[0].args.includes('@openai/codex@latest')); assert.ok(calls[0].args.includes('--engine-strict'));
-  assert.equal((await manager.list()).find(x => x.id === 'codex').source, 'managed');
+  const installed = (await manager.list()).find(x => x.id === 'codex');
+  assert.equal(installed.source, 'external'); assert.equal(installed.systemExecutable, system);
+  assert.equal(installed.managedExecutable, manager.managedExecutable('codex')); assert.equal(installed.managedInstalled, true);
+  assert.equal(installed.managedVersion, 'tool 1.2.3'); assert.equal(installed.canInstall, false); assert.equal(installed.canUpdate, true); assert.equal(installed.canReinstall, true);
+  assert.equal(calls[1].command, manager.managedExecutable('codex'));
   assert.equal((await done(manager, manager.uninstall('codex').id)).status, 'succeeded');
   assert.equal(await readFile(config, 'utf8'), '{"keep":true}'); assert.match(await manager.resolveExecutable('codex'), /bin.codex$/);
   assert.equal((await done(manager, manager.uninstall('codex').id)).status, 'failed');
@@ -48,6 +52,9 @@ test('managed npm install validates binary, resolves before PATH and uninstalls 
 test('running tools refuse destructive lifecycle actions and unsupported platforms are explicit', async t => {
   const { manager, calls } = await fixture(t, { isRunning: id => id === 'codex' });
   assert.equal((await done(manager, manager.install('codex').id)).status, 'failed'); assert.equal(calls.length, 0);
+  assert.equal((await done(manager, manager.updateTool('codex').id)).status, 'failed');
+  assert.equal((await done(manager, manager.reinstall('codex').id)).status, 'failed');
+  assert.equal((await done(manager, manager.uninstall('codex').id)).status, 'failed'); assert.equal(calls.length, 0);
   assert.equal((await manager.list()).find(x => x.id === 'codex').canInstall, false);
   assert.equal((await done(manager, manager.install('claude-desktop').id)).status, 'failed');
   const other = new ToolInstaller({ root: manager.root, platform: 'freebsd' }); t.after(() => other.close());
@@ -78,6 +85,7 @@ test('Hermes uses official Git source and isolated uv runtime directories', asyn
   const { manager, calls } = await fixture(t); const job = await done(manager, manager.install('hermes').id);
   assert.equal(job.status, 'succeeded'); assert.ok(calls[0].args.includes('git+https://github.com/NousResearch/hermes-agent.git'));
   assert.equal(calls[0].env.UV_TOOL_DIR, join(manager.prefix('hermes'), 'tools')); assert.equal(calls[0].env.UV_PYTHON_INSTALL_DIR, join(manager.prefix('hermes'), 'python'));
+  assert.equal((await done(manager, manager.updateTool('hermes').id)).status, 'succeeded'); assert.ok(calls[2].args.includes('--upgrade'));
 });
 test('existing unowned installation prefix is never overwritten and secrets are not inherited', async t => {
   const { manager, calls } = await fixture(t); await mkdir(manager.prefix('pi'), { recursive: true });
@@ -86,12 +94,55 @@ test('existing unowned installation prefix is never overwritten and secrets are 
   assert.equal(await readFile(join(manager.prefix('pi'), 'keep'), 'utf8'), 'original');
   await done(manager, manager.install('codex').id); assert.equal(calls[0].env.API_KEY, undefined);
 });
+test('update and reinstall target only managed copies while preserving system tools and accounts', async t => {
+  const { manager, calls, dir, bin } = await fixture(t);
+  const accountHome = join(dir, 'account'); await mkdir(accountHome); const account = join(accountHome, 'auth.json'); await writeFile(account, '{"account":"keep"}');
+  Object.assign(manager.env, { HOME: accountHome, USERPROFILE: accountHome, CODEX_HOME: accountHome, CLAUDE_CONFIG_DIR: accountHome });
+  assert.equal((await done(manager, manager.updateTool('codex').id)).status, 'failed');
+  assert.equal((await done(manager, manager.reinstall('codex').id)).status, 'failed'); assert.equal(calls.length, 0);
+  assert.equal((await done(manager, manager.install('codex').id)).status, 'succeeded');
+  assert.equal((await done(manager, manager.install('codex').id)).status, 'failed');
+  const stale = join(manager.prefix('codex'), 'old-artifact'); await writeFile(stale, 'old');
+  assert.equal((await done(manager, manager.updateTool('codex').id)).status, 'succeeded'); assert.equal(await readFile(stale, 'utf8'), 'old');
+  assert.equal((await done(manager, manager.reinstall('codex').id)).status, 'succeeded'); await assert.rejects(readFile(stale), { code: 'ENOENT' });
+  for (const call of calls) { assert.equal(call.env.HOME, join(manager.prefix('codex'), '.install-home')); assert.equal(call.env.CODEX_HOME, undefined); assert.equal(call.env.CLAUDE_CONFIG_DIR, undefined); }
+  assert.equal(await readFile(account, 'utf8'), '{"account":"keep"}'); assert.equal(await readFile(join(bin, 'codex'), 'utf8'), 'fixture');
+  assert.equal((await done(manager, manager.uninstall('codex').id)).status, 'succeeded');
+  assert.equal(await readFile(account, 'utf8'), '{"account":"keep"}'); assert.equal(await manager.resolveExecutable('codex'), join(bin, 'codex'));
+});
+test('managed PATH entries stay managed and unowned binaries are never launched', async t => {
+  const { manager, bin } = await fixture(t);
+  await done(manager, manager.install('pi').id); manager.env.PATH = join(manager.prefix('pi'), 'bin') + ':' + bin;
+  const row = (await manager.list()).find(item => item.id === 'pi'); assert.equal(row.source, 'managed'); assert.equal(row.systemExecutable, null); assert.equal(row.executable, manager.managedExecutable('pi'));
+  await mkdir(join(manager.prefix('claude'), 'bin'), { recursive: true }); await writeFile(manager.managedExecutable('claude'), 'fixture'); await chmod(manager.managedExecutable('claude'), 0o755);
+  assert.equal(await manager.resolveExecutable('claude'), null);
+});
+test('Windows system npm launch resolves beside the system shim even when a managed copy exists', async t => {
+  const { manager, bin } = await fixture(t); manager.platform = 'win32';
+  const pkg = join(bin, 'node_modules', '@openai', 'codex'); await mkdir(pkg, { recursive: true });
+  await writeFile(join(pkg, 'package.json'), JSON.stringify({ bin: { codex: 'cli.js' } })); await writeFile(join(pkg, 'cli.js'), 'fixture'); await writeFile(join(bin, 'codex.cmd'), 'fixture');
+  const managedPkg = join(manager.prefix('codex'), 'node_modules', '@openai', 'codex'); await mkdir(managedPkg, { recursive: true });
+  await writeFile(join(managedPkg, 'package.json'), JSON.stringify({ bin: { codex: 'other.js' } })); await writeFile(join(managedPkg, 'other.js'), 'fixture'); await writeFile(manager.managedExecutable('codex'), 'fixture');
+  await writeFile(join(manager.prefix('codex'), 'dsh-install.json'), JSON.stringify({ owner: 'dsh-plus', toolId: 'codex' }));
+  assert.deepEqual(await manager.resolveLaunch('codex'), { command: process.execPath, args: [join(pkg, 'cli.js')] });
+  assert.deepEqual(await manager.resolveLaunch('codex', { managed: true }), { command: process.execPath, args: [join(managedPkg, 'other.js')] });
+});
+test('cancelled executions keep the tool locked until the subprocess exits', async t => {
+  let release, started; const entered = new Promise(resolve => { started = resolve; });
+  const { manager } = await fixture(t, { executor: async () => { started(); await new Promise(resolve => { release = resolve; }); return { stdout: 'ok' }; } });
+  const job = manager.install('pi'); await entered; manager.cancel(job.id);
+  const row = (await manager.list()).find(item => item.id === 'pi'); assert.equal(row.job.status, 'cancelled'); assert.equal(row.canInstall, false); assert.equal(row.canUninstall, false); assert.equal(row.canReinstall, false);
+  await assert.rejects(manager.resolveLaunch('pi'), /等待任务结束/);
+  assert.throws(() => manager.reinstall('pi'), /进行中/); release(); await Promise.all([...manager.tasks]);
+  assert.equal((await manager.list()).find(item => item.id === 'pi').canUninstall, true);
+});
 test('Windows managed npm launcher resolves JavaScript entry without a shell', async t => {
   const { manager } = await fixture(t); manager.platform = 'win32';
   const packageDir = join(manager.prefix('pi'), 'node_modules', '@earendil-works', 'pi-coding-agent');
   await mkdir(packageDir, { recursive: true });
   await writeFile(join(packageDir, 'package.json'), JSON.stringify({ bin: { pi: 'cli.js' } })); await writeFile(join(packageDir, 'cli.js'), 'fixture');
   await writeFile(manager.managedExecutable('pi'), 'fixture');
+  await writeFile(join(manager.prefix('pi'), 'dsh-install.json'), JSON.stringify({ owner: 'dsh-plus', toolId: 'pi' }));
   assert.deepEqual(await manager.resolveLaunch('pi'), { command: process.execPath, args: [join(packageDir, 'cli.js')] });
 });
 test('executor invokes argv without a shell and kills cancelled subprocess', async () => {

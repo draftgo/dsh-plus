@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createModelProviders } from '../src/model-providers.mjs';
+import { assertProviderToolAccess } from '../src/provider-access.mjs';
 function fixture() {
   const refs = new Map([['ROUTER_KEY', 'fixture-secret-value'], ['NATIVE_KEY', 'native-fixture-secret']]);
   const doc = { ns: 'llm-pi-ai', revision: 1, value: { providers: { routergo: { displayName: 'RouterGo', baseURL: 'https://gateway.example/v1', apiKeyEnv: 'ROUTER_KEY', api: 'openai-completions', models: [] } } } };
@@ -61,4 +62,56 @@ test('managed route descriptor reuses official protocol and credential reference
  assert.equal(descriptor.protocol,'openai-completions');assert.equal(descriptor.credentialRef,'ROUTER_KEY');
  assert.equal(descriptor.baseURL,'https://gateway.example/v1');
  assert.doesNotMatch(JSON.stringify(await service.list()),/fixture-secret|apiKey|credentialRef/);
+});
+
+function subscriptionFixture() {
+  const { ctx, doc, refs } = fixture(), records = new Map(), original = ctx.llm.listConfigurableProviders;
+  ctx.llm.listConfigurableProviders = () => [...original(),
+    { provider: 'openai-codex', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'openai-codex'], nativeAuth: { oauth: true, env: [] } },
+    { provider: 'anthropic', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'anthropic'], defaultBaseURL: 'https://api.anthropic.com', nativeAuth: { oauth: true, env: ['ANTHROPIC_API_KEY', 'ANTHROPIC_OAUTH_TOKEN'] } },
+  ];
+  ctx.credentials.readRecord = async key => records.get(key);
+  return { service: createModelProviders(ctx), records, refs, doc };
+}
+test('subscription identities require official OAuth evidence and never become API credentials', async () => {
+  const { service, records, refs, doc } = subscriptionFixture();
+  const missing = await service.describeAccess('openai-codex');
+  assert.equal(missing.authMode, 'subscription'); assert.equal(missing.configured, false);
+  assert.deepEqual(missing.harnessTools, ['codex']);
+  records.set('llm-pi-ai/openai-codex', { kind: 'grant', payload: { type: 'oauth', access: 'private-access', refresh: 'private-refresh', expires: 0 } });
+  const subscription = await service.describeAccess('openai-codex');
+  assert.equal(subscription.configured, true); assert.equal(subscription.authSource, 'official-oauth-record');
+  assert.doesNotThrow(() => assertProviderToolAccess(subscription, 'codex'));
+  for (const tool of ['claude', 'harness', 'deepseek', 'pi']) assert.throws(() => assertProviderToolAccess(subscription, tool), { code: 'SUBSCRIPTION_TOOL_MISMATCH' });
+  await assert.rejects(service.resolve('openai-codex'), /订阅登录不能转换为 API 密钥/);
+  assert.equal((await service.list()).find(row => row.id === 'openai-codex').authMode, 'subscription');
+  assert.equal((await service.describeAccess('routergo')).authMode, 'api');
+  assert.doesNotThrow(() => assertProviderToolAccess(undefined, 'codex'));
+  assert.doesNotMatch(JSON.stringify(await service.accessList()), /private-access|private-refresh|fixture-secret/);
+  // The same official route can explicitly name an API key; its own setting wins.
+  doc.value.providers['openai-codex'] = { apiKeyEnv: 'ROUTER_KEY', baseURL: 'https://gateway.example/v1' };
+  assert.equal((await service.describeAccess('openai-codex')).authMode, 'api');
+  refs.delete('ROUTER_KEY');
+  assert.equal((await service.describeAccess('openai-codex')).authMode, 'unconfigured');
+});
+test('OAuth env credentials restrict their own official provider without locking custom API routes', async () => {
+  const { service, refs } = subscriptionFixture();
+  refs.set('ANTHROPIC_OAUTH_TOKEN', 'private-oauth-env');
+  const subscription = await service.describeAccess('anthropic');
+  assert.equal(subscription.authMode, 'subscription'); assert.equal(subscription.authSource, 'official-oauth-env');
+  assert.deepEqual(subscription.harnessTools, ['claude']);
+  assert.equal((await service.describeAccess('routergo')).authMode, 'api');
+  refs.set('ANTHROPIC_API_KEY', 'api-fixture');
+  assert.equal((await service.describeAccess('anthropic')).authMode, 'api');
+});
+
+test('existing native CLI subscription is discovered without copying account credentials into Harness', async () => {
+  const { service } = subscriptionFixture();
+  service.setNativeAuth({ status: async tool => ({ tool, status: 'subscription' }) });
+  for (const [id, tool] of [['openai-codex', 'codex'], ['anthropic', 'claude']]) {
+    const access = await service.describeAccess(id);
+    assert.equal(access.configured, true); assert.equal(access.authSource, 'native-cli-login');
+    assert.deepEqual(access.harnessTools, [tool]);
+    await assert.rejects(service.resolve(id), /订阅/);
+  }
 });

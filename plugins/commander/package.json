@@ -1,7 +1,7 @@
 {
   "name": "@dowork/commander",
   "displayName": "DSH-Plus",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "DSH-Plus native coding agents, shared projects, voice and enhanced Harness UI",
@@ -19,6 +19,7 @@
   },
   "files": [
     "src",
+    "shared",
     "cordis.patch.yml",
     "config.example.json",
     "config/routergo-deepseek.example.yml",
@@ -80,6 +81,7 @@
         "@deepseek-ai/dsh-client-ui-model-selection",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-theme",
         "@deepseek-ai/dsh-client-ui-settings-models"
       ],
       "platform": "web"

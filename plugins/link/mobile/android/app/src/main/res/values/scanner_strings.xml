@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="scanner_back">返回</string>
+    <string name="scanner_title">扫码连接</string>
+    <string name="scanner_heading">扫描工作台的二维码</string>
+    <string name="scanner_description">在工作台的「远程连接」中点击「连接手机」，\n然后将配对二维码放入取景框。</string>
+    <string name="scanner_frame_hint">对准二维码，即可自动识别</string>
+    <string name="scanner_wrong_code">这不是有效的 Link 配对码，请扫描工作台「连接手机」中的二维码。</string>
+    <string name="scanner_camera_loading">正在打开相机…</string>
+    <string name="scanner_flash_on">开启手电筒</string>
+    <string name="scanner_flash_off">关闭手电筒</string>
+    <string name="scanner_network_hint">本地电脑与手机连接同一 Wi-Fi，无需公网。\n云工作台使用已配置的 HTTPS 域名。</string>
+</resources>

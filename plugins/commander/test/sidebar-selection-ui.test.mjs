@@ -25,6 +25,7 @@ function render(activeSessionId, options = {}) {
   const host = {
     sessions: { list: { getSnapshot: () => snapshot } },
     workspaces: { list: { getSnapshot: () => options.workspaces ?? ({ archivedSessionIds: [] }) } },
+    remoteAccess: { source: () => ({ subscribe: () => () => {}, getSnapshot: () => true }) },
     uiSession: { sessionStatus: { getSnapshot: () => new Map() } },
   };
   const tree = module.exports.Projects({ host, open() {}, newSession: options.newSession ?? (() => {}) });

@@ -65,6 +65,24 @@ test('managed directory symlinks are refused without touching target', async t =
   await assert.rejects(routes.launch({ tool: 'codex', route, sessionId: randomUUID() }), /符号链接/);
 });
 
+test('quick settings are captured per session and cannot override credentials or routing', async t => {
+  const { directory, routes } = await fixture(t); t.after(() => rm(directory, { recursive: true, force: true }));
+  const quickSettings = { multiAgent: true, agentThreads: 3, effort: 'high' };
+  const route = await routes.capture({ tool: 'codex', providerId: 'a', model: 'm', quickSettings });
+  quickSettings.effort = 'low';
+  const launch = await routes.launch({ tool: 'codex', route, sessionId: randomUUID() });
+  assert.equal(launch.commandArgs.includes('features.multi_agent=true'), true);
+  assert.equal(launch.commandArgs.includes('agents.max_threads=3'), true);
+  assert.equal(launch.commandArgs.includes('model_reasoning_effort="high"'), true);
+  await assert.rejects(routes.launch({ tool: 'codex', route: { ...route, quickSettings: { effort: 'low' } }, sessionId: randomUUID() }), /绑定无效/);
+  await assert.rejects(routes.capture({ tool: 'codex', providerId: 'a', model: 'm', quickSettings: { env: {} } }), /不支持/);
+  const claude = await routes.capture({ tool: 'claude', providerId: 'a', model: 'm', quickSettings: { agentTeams: false, agentWindow: 'in-process', effort: 'high' } });
+  const c = await routes.launch({ tool: 'claude', route: claude, sessionId: randomUUID() });
+  assert.equal(c.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS, '0');
+  assert.equal(c.settings.teammateMode, 'in-process'); assert.equal(c.settings.effortLevel, 'high');
+  assert.equal(c.env.ANTHROPIC_AUTH_TOKEN, 'secret-a');
+});
+
 test('A/B sessions and restart retain routes; default changes only affect new sessions and errors cannot persist keys', async t => {
   const { directory, routes, entries } = await fixture(t);
   let defaults = [{ tool: 'codex', providerId: 'a', model: 'model-a' }], fail = false;
@@ -115,4 +133,41 @@ test('legacy native sessions never capture defaults or move native handles into 
   assert.equal(explicit.routeMode, 'native-unbound');
   await runtime.disconnect(old.id); await runtime.connect(old.id);
   await assert.rejects(runtime.create({ provider: 'codex', nativeId: 'other-native', route: { providerId: 'a', model: 'm' } }), /已有原生会话/);
+});
+
+test('explicit model routes inherit tool quick settings once without changing their supplier', async t => {
+  const { directory, routes } = await fixture(t);
+  const runtime = await new Commander({ dataDir: join(directory, 'quick-default'), routeService: routes }).open();
+  t.after(async () => { await runtime.close(); await rm(directory, { recursive: true, force: true }); });
+  let defaults = [{ tool: 'codex', providerId: 'a', model: 'default-a', quickSettings: { effort: 'high' } }];
+  runtime.toolProfiles = { list: async () => ({ defaults }) };
+  runtime.providers.set('codex', { config: {}, async connect(session) { return { nativeId: session.id, close: async () => {} }; } });
+  const session = await runtime.create({ provider: 'codex', route: { providerId: 'b', model: 'explicit-b' } });
+  assert.equal(session.route.providerId, 'b'); assert.equal(session.model, 'explicit-b');
+  assert.equal(session.route.quickSettings.effort, 'high');
+  defaults[0].quickSettings.effort = 'low';
+  await runtime.disconnect(session.id); await runtime.connect(session.id);
+  assert.equal(runtime.snapshot(session.id).route.quickSettings.effort, 'high');
+});
+
+test('subscription routes retain native login homes, reject cross-tool use and never resolve API secrets', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'subscription-routes-')); t.after(() => rm(directory, { recursive: true, force: true }));
+  const access = { id: 'subscription', authMode: 'subscription', configured: true, harnessTools: ['codex'] };
+  const routes = createSessionRoutes({ directory, providers: { resolve() { throw Error('must not resolve API secrets'); }, describeAccess: async () => access } });
+  const route = await routes.capture({ tool: 'codex', providerId: 'subscription', model: 'subscription-model' });
+  assert.equal(route.mode, 'subscription'); assert.equal(route.baseURL, undefined);
+  const launch = await routes.launch({ tool: 'codex', route, sessionId: randomUUID() });
+  assert.equal(launch.env.CODEX_HOME, undefined); assert.equal(Object.hasOwn(launch.env, 'CODEX_HOME'), false);
+  assert.equal(launch.managedProfile.subscription, true); assert.equal(launch.managedProfile.isolated, false);
+  assert.equal(launch.commandArgs.includes('model_provider="openai"'), true);
+  assert.equal(launch.commandArgs.includes('force_login_method="chatgpt"'), true);
+  await assert.rejects(routes.capture({ tool: 'claude', providerId: 'subscription', model: 'm' }), /对应/);
+  access.configured = false;
+  await assert.rejects(routes.launch({ tool: 'codex', route, sessionId: randomUUID() }), /失效/);
+  access.configured = true; access.harnessTools = ['claude'];
+  const c = await routes.capture({ tool: 'claude', providerId: 'subscription', model: 'claude-model' });
+  const claude = await routes.launch({ tool: 'claude', route: c, sessionId: randomUUID() });
+  assert.equal(Object.hasOwn(claude.env, 'CLAUDE_CONFIG_DIR'), false);
+  assert.equal(claude.settings.forceLoginMethod, 'claudeai');
+  assert.deepEqual(claude.settingSources, []);
 });

@@ -1,0 +1,106 @@
+.cmd-mobile-workbench { display: none; }
+.cmd-shell-frame[data-plus-resizing],
+.cmd-shell-frame[data-plus-resizing] * { animation: none !important; transition: none !important; }
+
+/* The same workbench, settings slots and composer on a smaller canvas. */
+@media (max-width: 767px) {
+  html, body, #root { width: 100%; min-width: 0; overscroll-behavior: none; }
+  #root { height: var(--cmd-mobile-viewport-height, 100dvh); }
+  .cmd-shell-frame[data-plus-shell] {
+    box-sizing: border-box; height: var(--cmd-mobile-viewport-height, 100dvh);
+    grid-template-columns: 0 minmax(0, 1fr) 0 !important;
+    padding-top: calc(52px + env(safe-area-inset-top, 0px));
+    --dsh-frame-top-clearance: 0px; --dsh-frame-leading-clearance: 0px;
+    --dsh-frame-chrome-top: 0px; --dsh-frame-overlay-top: 12px;
+  }
+  .cmd-shell-frame[data-plus-shell] > :first-child {
+    position: absolute; inset: calc(52px + env(safe-area-inset-top, 0px)) auto 0 0; z-index: 40;
+    width: min(304px, 86vw); max-width: 100%;
+    padding-top: env(safe-area-inset-top, 0px); box-sizing: border-box;
+    background: var(--dsw-specific-sidebar-fill);
+    visibility: visible; transform: translateX(0);
+    transition: transform 180ms ease, visibility 180ms;
+  }
+  .cmd-shell-frame[data-plus-shell][data-sidebar-collapsed] > :first-child {
+    visibility: hidden; pointer-events: none; transform: translateX(-100%);
+  }
+  .cmd-shell-frame[data-plus-shell] > [data-side],
+  .cmd-shell-frame[data-plus-shell] > [data-shell-leading] { display: none; }
+  .cmd-shell-sidebar { height: 100%; padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .cmd-shell-sidebar [class*="logoRow"] { display: none; }
+  .cmd-shell-sidebar [class*="topStrip"] { display: none !important; }
+  .cmd-shell-sidebar [class*="railMark"] { display: none !important; }
+  .cmd-shell-sidebar .cmd-session, .cmd-shell-sidebar [class*="panelRow"],
+  .cmd-shell-sidebar .cmd-settings { min-height: 44px; }
+  .cmd-shell-frame:has(.cmd-projects),
+  .cmd-shell-sidebar:has(.cmd-projects),
+  .cmd-shell-sidebar:has(.cmd-projects) * { animation: none !important; transition: none !important; }
+  .cmd-mobile-workbench:not([hidden]) { display: contents; }
+  .cmd-mobile-toolbar {
+    position: absolute; z-index: 50; inset: 0 0 auto; display: flex; align-items: center; gap: 8px;
+    height: calc(52px + env(safe-area-inset-top, 0px)); box-sizing: border-box;
+    padding: env(safe-area-inset-top, 0px) 10px 0; pointer-events: auto;
+    background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary);
+    border-bottom: 0.5px solid var(--dsw-alias-border-l3);
+  }
+  .cmd-mobile-toolbar > span { flex: 1; text-align: center; font-size: 14px; font-weight: 500; }
+  .cmd-mobile-toolbar > button {
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    width: 44px; height: 44px; border: 0; border-radius: 12px; padding: 0;
+    background: transparent; color: inherit; cursor: pointer; touch-action: manipulation;
+  }
+  .cmd-mobile-toolbar > button:active { background: var(--dsw-alias-interactive-bg-hover); }
+  .cmd-mobile-sidebar-icon-open { transform: rotate(180deg); }
+  .cmd-mobile-drawer-mask {
+    position: absolute; inset: 0; z-index: 1; pointer-events: auto;
+    appearance: none; border: 0; padding: 0; background: var(--dsw-alias-bg-mask-1, #0006);
+  }
+  .cmd-shell-frame > :nth-child(2) { min-width: 0; grid-column: 2; grid-row: 1; }
+  .cmd-shell-frame > [data-rightbar-col] { grid-column: 3; grid-row: 1; }
+  .cmd-shell-frame [data-conversation-header-leading] { display: none; }
+  .cmd-shell-frame header:has([data-conversation-header-leading]) { padding-inline: 12px; }
+  .cmd-shell-frame [data-conversation-tabs] { overflow-x: auto; scrollbar-width: none; }
+  .cmd-shell-frame [data-conversation-region="composer"] {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    --dsh-composer-side-clearance: 10px;
+    --dsh-composer-text-max-height: min(240px, 35dvh);
+  }
+  .cmd-shell-frame [contenteditable="true"],
+  :is(.cmd-shell-frame, [role="dialog"]) :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select) {
+    font-size: max(16px, 1em); min-width: 0; max-width: 100%;
+    scroll-margin-block: 60px;
+  }
+  .cmd-shell-frame [contenteditable="true"] { min-height: 44px; -webkit-user-select: text; user-select: text; }
+  .cmd-shell-frame [data-conversation-scroll] { overscroll-behavior-y: contain; }
+  /* The official settings portal becomes a single-column sheet with scrollable tabs. */
+  [data-shortcut-modal="settings"][role="dialog"] {
+    width: calc(100vw - 16px); max-width: calc(100vw - 16px);
+    height: calc(var(--cmd-mobile-viewport-height, 100dvh) - 24px);
+    max-height: calc(var(--cmd-mobile-viewport-height, 100dvh) - 24px);
+    flex-direction: column; border-radius: 16px;
+  }
+  [data-shortcut-modal="settings"] > nav { width: 100%; padding: 16px 12px 8px; gap: 10px; }
+  [data-shortcut-modal="settings"] > nav > :first-child { padding-inline: 8px; padding-right: 44px; }
+  [data-shortcut-modal="settings"] > nav > :last-child {
+    flex-direction: row; flex-wrap: nowrap; overflow: auto; gap: 4px; scrollbar-width: none;
+  }
+  [data-shortcut-modal="settings"] > nav button { flex: none; height: 44px; padding-inline: 12px; }
+  [data-shortcut-modal="settings"] > :last-child { flex: 1; min-height: 0; }
+  [data-shortcut-modal="settings"] > :last-child > :first-child {
+    height: auto; min-height: 0; padding: 0 12px;
+  }
+  [data-shortcut-modal="settings"] > :last-child > :first-child > button:last-child {
+    position: absolute; top: 6px; right: 6px; width: 44px; height: 44px;
+  }
+  [data-shortcut-modal="settings"] > :last-child > :last-child { padding: 12px 16px 20px; overscroll-behavior: contain; }
+  [data-shortcut-modal="settings"] :is(fieldset, section, form) { min-width: 0; max-width: 100%; }
+  [data-shortcut-modal="settings"] :is(h2, h3, p, label) { overflow-wrap: anywhere; }
+  [data-shortcut-modal="settings"] .voice-setting-toggle { gap: 12px; }
+  [data-shortcut-modal="settings"] .voice-model-actions,
+  [data-shortcut-modal="settings"] .voice-settings footer { flex-wrap: wrap; }
+  [role="dialog"]:not([aria-label="工作台导航"]) { max-width: calc(100vw - 16px); box-sizing: border-box; }
+  [role="menu"], [role="listbox"] { max-width: calc(100vw - 16px); max-height: min(420px, 65dvh); overflow-y: auto; }
+}
+@media (max-width: 767px) and (prefers-reduced-motion: reduce) {
+  .cmd-shell-frame[data-plus-shell] > :first-child { transition: none; }
+}

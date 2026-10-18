@@ -45,6 +45,14 @@ test('direct sessions share Harness projects, submit without a model router, and
   await assert.rejects(api({action:'send',id:hidden.id,text:'x',requestId:'r'}),/Harness conversation/);
 });
 
+test('binding lookup returns the owning native session identity for the model lock and activity view', async t => {
+  const { c, api, dir } = await setup(t);
+  assert.deepEqual(await api({ action: 'binding', harnessSessionId: 'harness-owner' }), { bound: false });
+  const session = await c.create({ provider: 'codex', model: 'gpt-test', cwd: dir, ownerSessionId: 'harness-owner' });
+  const binding = await api({ action: 'binding', harnessSessionId: 'harness-owner' });
+  assert.deepEqual(binding, { bound: true, id: session.id, cursor: session.cursor, provider: 'codex', model: 'gpt-test', route: null });
+});
+
 test('native delegation requires human approval, inherits project and returns child results; unrelated results are rejected', async t => {
   const { c,api,dir }=await setup(t);
   const parent=(await api({action:'create',provider:'codex',projectId:'shared'})).session;

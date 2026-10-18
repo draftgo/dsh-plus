@@ -1,3 +1,5 @@
+import { subscriptionHarnessTool } from './provider-access.mjs';
+
 const LIMIT = 4 * 1024 * 1024;
 const forbidden = new Set(['__proto__', 'constructor', 'prototype']);
 class ProviderError extends Error { constructor(message, status = 400) { super(message); this.status = status; } }
@@ -52,21 +54,56 @@ async function discover(config, signal) {
   return { models };
 }
 export function createModelProviders(ctx) {
+  let nativeAuth;
   const entries = () => ctx.llm.listConfigurableProviders();
   const document = ns => ctx.settings.describe().find(row => row.ns === ns);
   const profile = entry => pathValue(document(entry.settingsNs)?.value, entry.settingsPath) || {};
   const credential = async (entry, value) => { const refs = value.apiKeyEnv ? [value.apiKeyEnv] : entry.nativeAuth?.env || []; for (const ref of refs) { const hit = await ctx.credentials.resolve(ref); if (hit?.value) return hit.value; } return ''; };
   const address = (entry, value) => value.baseURL || entry.defaultBaseURL || '';
+  const access = async (entry, value) => {
+    const apiKey = await credential(entry, value);
+    const nativeOAuth = !value.apiKeyEnv && entry.declared !== true && entry.settingsNs === 'llm-pi-ai' && entry.nativeAuth?.oauth;
+    let oauthEnv = false;
+    if (nativeOAuth && apiKey) {
+      oauthEnv = /^sk-ant-oat/iu.test(apiKey);
+      for (const ref of entry.nativeAuth.env || []) if (/oauth/iu.test(ref) && (await ctx.credentials.resolve(ref))?.value === apiKey) oauthEnv = true;
+    }
+    if (apiKey && !oauthEnv) return { id: entry.provider, authMode: 'api', configured: true };
+    // A named API reference is authoritative, even if another route has OAuth.
+    if (value.apiKeyEnv || entry.declared === true || entry.settingsNs !== 'llm-pi-ai' || !entry.nativeAuth?.oauth) return { id: entry.provider, authMode: 'unconfigured', configured: false };
+    const record = /^[a-z][a-z0-9-]*$/u.test(entry.provider) ? await ctx.credentials.readRecord?.('llm-pi-ai/' + entry.provider) : undefined;
+    const tool = subscriptionHarnessTool(entry.provider);
+    const native = tool && nativeAuth ? await nativeAuth.status(tool) : undefined;
+    const nativeLogin = native?.status === 'subscription';
+    const granted = nativeLogin || oauthEnv || record?.kind === 'grant' && record.payload?.type === 'oauth' && typeof record.payload.access === 'string' && record.payload.access.length > 0;
+    if (!granted && entry.nativeAuth.env?.length) return { id: entry.provider, authMode: 'unconfigured', configured: false };
+    return { id: entry.provider, authMode: 'subscription', configured: granted, harnessTools: tool ? [tool] : [], authSource: nativeLogin ? 'native-cli-login' : oauthEnv ? 'official-oauth-env' : granted ? 'official-oauth-record' : 'official-oauth-provider', ...(native ? { nativeLoginStatus: native.status } : {}), routeReason: granted ? '订阅登录仅供对应工具使用；请在 Harness 工具中使用本机登录，订阅凭据不会转换为 API 密钥。' : '此供应商需要订阅登录；请先在对应 Harness 工具中完成登录。' };
+  };
   const service = {
+    setNativeAuth(value) { nativeAuth = value; },
     async list() {
       // describe() projects every plugin schema/config; do it once per directory read.
       const documents = new Map(ctx.settings.describe().map(row => [row.ns, row.value])), list = [];
-      for (const entry of entries()) { const value = pathValue(documents.get(entry.settingsNs), entry.settingsPath) || {}, baseURL = address(entry, value); if (!baseURL || !await credential(entry, value)) continue; list.push({ id: entry.provider, name: value.displayName || entry.displayName || entry.provider, baseURL: endpoint(baseURL), configured: true, ...(entry.declared === true ? { declared: true } : {}) }); }
+      for (const entry of entries()) {
+        const value = pathValue(documents.get(entry.settingsNs), entry.settingsPath) || {}, baseURL = address(entry, value), identity = await access(entry, value);
+        if (identity.authMode !== 'subscription' && (!baseURL || !identity.configured)) continue;
+        list.push({ ...identity, name: value.displayName || entry.displayName || entry.provider, ...(baseURL ? { baseURL: endpoint(baseURL) } : {}), ...(entry.declared === true ? { declared: true } : {}) });
+      }
       return list.sort((a, b) => Number(/routergo/iu.test(b.id + b.name + b.baseURL)) - Number(/routergo/iu.test(a.id + a.name + a.baseURL)) || a.name.localeCompare(b.name));
+    },
+    async accessList() {
+      const documents = new Map(ctx.settings.describe().map(row => [row.ns, row.value]));
+      return Promise.all(entries().map(entry => access(entry, pathValue(documents.get(entry.settingsNs), entry.settingsPath) || {})));
+    },
+    async describeAccess(id) {
+      const entry = entries().find(row => row.provider === id); if (!entry) throw new ProviderError('Provider is not configured', 404);
+      return access(entry, profile(entry));
     },
     async resolve(id) {
       const entry = entries().find(row => row.provider === id); if (!entry) throw new ProviderError('Provider is not configured', 404);
-      const value = profile(entry), baseURL = endpoint(address(entry, value)), apiKey = await credential(entry, value);
+      const value = profile(entry);
+      if ((await access(entry, value)).authMode === 'subscription') throw new ProviderError('订阅登录不能转换为 API 密钥，请在对应 Harness 工具中使用本机登录。', 409);
+      const baseURL = endpoint(address(entry, value)), apiKey = await credential(entry, value);
       if (!apiKey) throw new ProviderError('Provider credential is not configured', 409); return { baseURL, apiKey };
     },
     async describeRoute(id) {

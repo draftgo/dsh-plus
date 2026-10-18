@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Modal } from '@deepseek-ai/dsh-client-ui-primitives';
+import { Modal, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives';
 import { ModelsSection } from '../../../deepseek-harness/packages/client/ui-settings-models/src/client/ModelsSection.tsx';
 import { UIIcon } from './iconsax.jsx';
 import { ProviderBrandIcon } from './provider-brand-icon.jsx';
+import { ToolBrandIcon } from './tool-brand-icon.jsx';
 export { ProviderBrandIcon } from './provider-brand-icon.jsx';
 import css from './provider-settings.css';
 
@@ -60,10 +61,13 @@ export function useProviderHarness(providerId) {
     return () => controller.abort();
   }, [revision]);
   const tools = catalog ? [harnessEntry, ...(catalog.tools || []).filter(tool => tool.configSupported !== false)] : [];
+  const access = catalog?.providerAccess?.find(provider => provider.id === providerId);
+  const restricted = access?.authMode === 'subscription';
+  const permitted = restricted ? access.harnessTools || [] : tools.map(tool => tool.id);
   const stored = catalog?.bindings?.[providerId];
-  const current = selection ?? (Array.isArray(stored) ? stored : tools.map(tool => tool.id));
-  const toggle = id => setSelection(previous => { const selected = previous ?? current; return selected.includes(id) ? selected.filter(value => value !== id) : [...selected, id]; });
-  return { tools, current, toggle, loading: !catalog && !failure, failure, retry: () => refresh(value => value + 1),
+  const current = restricted ? permitted : (selection ?? (Array.isArray(stored) ? stored : permitted)).filter(id => permitted.includes(id));
+  const toggle = id => { if (restricted || !permitted.includes(id)) return; setSelection(previous => { const selected = previous ?? current; return selected.includes(id) ? selected.filter(value => value !== id) : [...selected, id]; }); };
+  return { tools, current, toggle, restricted, permitted, access, loading: !catalog && !failure, failure, retry: () => refresh(value => value + 1),
     async save() {
       if (selection === null) return;
       if (!providerId || !catalog) throw Error('供应商已保存，但 Harness 适用范围尚未就绪，请重试保存');
@@ -73,5 +77,14 @@ export function useProviderHarness(providerId) {
   };
 }
 export function ProviderHarnessField({ value, disabled }) {
-  return <div className="cmd-provider-harness"><span className="cmd-provider-harness-label">适用 Harness 工具</span><div className="cmd-provider-harness-options" role="group" aria-label="适用 Harness 工具">{value.tools.map(tool => <button type="button" key={tool.id} disabled={disabled || value.loading} aria-pressed={value.current.includes(tool.id)} onClick={() => value.toggle(tool.id)}>{value.current.includes(tool.id) && <UIIcon name="check" size={13} />}<span>{tool.name}</span></button>)}</div>{value.loading ? <small>正在加载适用范围…</small> : value.failure ? <small role="alert">{value.failure} <button type="button" disabled={disabled} onClick={value.retry}>重试</button></small> : <small>允许这些工具使用此供应商。</small>}</div>;
+  return <aside className="cmd-provider-harness" aria-label="支持的 Harness 工具">
+    <span className="cmd-provider-harness-label">适用工具</span>
+    <div className="cmd-provider-harness-options" role="group" aria-label="适用 Harness 工具">{value.tools.map(tool => <Tooltip key={tool.id} label={tool.name} side="top" portal>
+      <button type="button" disabled={disabled || value.loading || value.restricted} aria-label={tool.name + (value.current.includes(tool.id) ? '，已启用' : value.restricted ? '，此订阅不支持' : '，未启用')} aria-pressed={value.current.includes(tool.id)} onClick={() => value.toggle(tool.id)}>
+        <ToolBrandIcon tool={tool.id === 'harness' ? 'deepseek' : tool.id} size={20} />
+        <span className="cmd-provider-harness-check">{value.current.includes(tool.id) && <UIIcon name="check" size={10} />}</span>
+      </button>
+    </Tooltip>)}</div>
+    {value.loading ? <small>加载中…</small> : value.failure ? <small role="alert">{value.failure} <button type="button" disabled={disabled} onClick={value.retry}>重试</button></small> : <small>{value.restricted ? value.access?.configured ? '订阅登录仅限对应工具；使用本机登录。' : '仅限对应工具，请先完成登录。' : '选择可使用此供应商的工具'}</small>}
+  </aside>;
 }

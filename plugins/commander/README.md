@@ -10,6 +10,8 @@
 
 ### RouterGo 的 DeepSeek 路由
 
+供应商编辑器的“适用工具”横向排列，窄屏自动换行。第三方供应商在“自定义设置 → 模型列表 → 展开模型”中配置该模型的思考档位，支持继承目录、非推理、预设和自定义映射；草稿随供应商一起保存，取消不生效。自定义复用官方 `reasoningEfforts`：档位键限 `off/minimal/low/medium/high/xhigh/max`，协议值可按网关修改（如 `max: ultra`）；只有 `off` 可不发送值，必须保留至少一个思考档位。聊天时仍在模型菜单选择实际使用的档位。声明能力不保证服务端支持，DeepSeek 等协议差异仍需按下方示例配置 `compat`。原生 DeepSeek 使用官方固定档位，不套用第三方映射编辑器。实现基于 Harness `571902028a75c64c1d767f4ae5fd099485f0ddf0`，通过插件构建适配复用官方草稿与保存流程，不修改子模块。
+
 自定义 RouterGo 路由使用官方通用 `llm-pi-ai` 适配器；其 `/models` 目录不一定携带思考能力。`deepseek-v4.1-flash` 的配置见 [配置示例](config/routergo-deepseek.example.yml)，合并到已有供应商配置，保留其他模型及密钥引用。模型级声明 `reasoningEfforts: { off: null, high: high }` 和 `compat.thinkingFormat: deepseek` 后，`off` 发送 `thinking.disabled`，`high` 发送 `thinking.enabled` 与 `reasoning_effort: high`。模型选择器只继承当前能力允许的思考档位，避免旧会话带入无效值。
 
 2026-10-16 实测，同一个 RouterGo 地址和凭据的 Chat Completions 可完成请求，但 Messages 流缺少 `message_start`。本机已停用指向 RouterGo 的该 Messages 配置，默认及受影响会话统一使用明确的 RouterGo Completions 路由；这不表示真正的 DeepSeek 官方端点存在同样问题。实测 `off` 请求确实发送关闭参数，但上游仍可能返回推理内容，是否执行关闭由上游决定。

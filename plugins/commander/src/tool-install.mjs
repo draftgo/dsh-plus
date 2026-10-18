@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, writeFile, rm, realpath, lstat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve, relative, isAbsolute } from 'node:path';
 import { TOOL_CATALOG, getTool, normalizeToolId } from './tool-catalog.mjs';
 const finished = new Set(['succeeded', 'failed', 'cancelled']);
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -38,25 +38,42 @@ export class ToolInstaller extends EventEmitter {
   prefix(id) { return join(this.root, normalizeToolId(id)); }
   managedExecutable(id) { const tool = getTool(id); return tool.command ? join(this.prefix(id), this.platform === 'win32' && tool.installer === 'npm' ? '' : 'bin', tool.command + (this.platform === 'win32' ? '.cmd' : '')) : null; }
   async usable(path) { if (!path) return false; try { await access(path, this.platform === 'win32' ? constants.F_OK : constants.X_OK); return true; } catch { return false; } }
-  async findExecutable(command) {
+  contains(parent, path) { const child = relative(parent, path); return child === '' || !/^\.\.[\\/]/.test(child) && child !== '..' && !isAbsolute(child); }
+  async findExecutable(command, { externalOnly = false } = {}) {
     if (!command) return null;
     const suffixes = this.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
     const extra = this.platform === process.platform ? [join(homedir(), '.local', 'bin'), join(homedir(), '.npm-global', 'bin'), join(homedir(), '.hermes', 'hermes-agent', 'venv', 'bin')] : [];
-    for (const dir of [...String(this.env.PATH ?? this.env.Path ?? '').split(this.platform === 'win32' ? ';' : delimiter).filter(Boolean), ...extra]) for (const suffix of suffixes) { const path = join(dir, command + suffix); if (await this.usable(path)) return path; }
+    for (const dir of [...String(this.env.PATH ?? this.env.Path ?? '').split(this.platform === 'win32' ? ';' : delimiter).filter(Boolean), ...extra]) for (const suffix of suffixes) {
+      const path = resolve(dir, command + suffix);
+      if (!(await this.usable(path))) continue;
+      if (externalOnly && (this.contains(this.root, path) || this.contains(this.root, await realpath(path).catch(() => path)))) continue;
+      return path;
+    }
     return null;
   }
-  async resolveExecutable(id) { const managed = this.managedExecutable(id); return await this.usable(managed) ? managed : this.findExecutable(getTool(id).command); }
-  async resolveLaunch(id) {
-    const command = await this.resolveExecutable(id); if (!command) return null;
+  async systemExecutable(id) { return this.findExecutable(getTool(id).command, { externalOnly: true }); }
+  async resolveExecutable(id) {
+    const system = await this.systemExecutable(id); if (system) return system;
+    const managed = this.managedExecutable(id); return await this.receipt(id) && await this.usable(managed) ? managed : null;
+  }
+  async resolveLaunch(id, { managed = false } = {}) {
+    if (!managed && [...this.records.values()].some(job => job.toolId === normalizeToolId(id) && (!finished.has(job.status) || this.controllers.has(job.id)))) throw new Error('工具正在安装、更新或卸载，请等待任务结束后启动会话。');
+    const command = managed ? this.managedExecutable(id) : await this.resolveExecutable(id); if (!command) return null;
     if (this.platform !== 'win32' || !/\.(cmd|bat)$/i.test(command)) return { command, args: [] };
-    const tool = getTool(id), packageDir = join(this.prefix(id), 'node_modules', tool.packageName ?? '');
+    const tool = getTool(id), packageDir = join(command === this.managedExecutable(id) ? this.prefix(id) : dirname(command), 'node_modules', tool.packageName ?? '');
     try {
       const pkg = JSON.parse(await readFile(join(packageDir, 'package.json'), 'utf8')); const bin = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin?.[tool.command];
       if (bin) { const path = resolve(packageDir, bin); if (path.startsWith(packageDir + '/') || path.startsWith(packageDir + '\\')) { await access(path); return { command: process.execPath, args: [path] }; } }
     } catch {}
-    throw new Error('Windows 外部命令需要原生可执行文件或 DSH-Plus 管理的 npm 启动入口。');
+    throw new Error('Windows 命令需要原生可执行文件或可解析的 npm JS 启动入口。');
   }
-  async receipt(id) { try { const value = JSON.parse(await readFile(join(this.prefix(id), 'dsh-install.json'), 'utf8')); return value.toolId === normalizeToolId(id) && value.owner === 'dsh-plus' ? value : null; } catch { return null; } }
+  async receipt(id) {
+    try {
+      const prefix = this.prefix(id), file = join(prefix, 'dsh-install.json');
+      if ((await lstat(prefix)).isSymbolicLink() || !(await lstat(file)).isFile()) return null;
+      const value = JSON.parse(await readFile(file, 'utf8')); return value.toolId === normalizeToolId(id) && value.owner === 'dsh-plus' ? value : null;
+    } catch { return null; }
+  }
   async npmCommand() {
     if (this.platform !== 'win32') { const command = await this.findExecutable('npm'); if (!command) throw new Error('需要可用的 Node.js 与 npm。'); return { command, args: [] }; }
     for (const path of [this.env.npm_execpath, join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')].filter(Boolean)) { try { await access(path); return { command: process.execPath, args: [path] }; } catch {} }
@@ -71,15 +88,23 @@ export class ToolInstaller extends EventEmitter {
   }
   async list() {
     return Promise.all(TOOL_CATALOG.map(async tool => {
-      const executable = await this.resolveExecutable(tool.id), managed = executable === this.managedExecutable(tool.id) && !!executable;
+      const systemExecutable = await this.systemExecutable(tool.id), managedPath = this.managedExecutable(tool.id);
       const receipt = await this.receipt(tool.id), support = await this.support(tool), running = await this.isRunning(tool.id);
-      const job = [...this.records.values()].find(value => value.toolId === tool.id && !finished.has(value.status));
-      return { ...tool, source: executable ? managed ? 'managed' : 'external' : 'none', installed: !!executable, executable, version: managed ? receipt?.version ?? null : null,
-        canInstall: support.supported && !job && !running, installReason: running ? '工具正在运行，请先结束会话。' : support.reason,
-        canUninstall: !!receipt && !running && !job, uninstallReason: running ? '工具正在运行，请先结束会话。' : !receipt ? '仅支持卸载 DSH-Plus 安装的工具；外部安装保持原样。' : null, ...(job ? { job: clone(job) } : {}) };
+      const managedInstalled = !!receipt && await this.usable(managedPath), executable = systemExecutable ?? (managedInstalled ? managedPath : null);
+      const job = [...this.records.values()].find(value => value.toolId === tool.id && (!finished.has(value.status) || this.controllers.has(value.id)));
+      const locked = running ? '工具正在运行，请先结束会话。' : job ? '工具已有进行中的安装任务。' : null;
+      const managedReason = locked ?? (!receipt ? '仅支持管理 DSH-Plus 安装的独立副本；系统安装与账户配置保持原样。' : support.reason);
+      return { ...tool, source: systemExecutable ? 'external' : managedInstalled ? 'managed' : 'none', installed: !!executable, executable, version: !systemExecutable && managedInstalled ? receipt.version ?? null : null,
+        systemExecutable, managedExecutable: managedPath, managedInstalled, managedVersion: receipt?.version ?? null,
+        canInstall: support.supported && !locked && !receipt, installReason: locked ?? (receipt ? '独立副本已安装，可更新或重新安装。' : support.reason),
+        canUpdate: support.supported && !!receipt && !locked, updateReason: managedReason,
+        canReinstall: support.supported && !!receipt && !locked, reinstallReason: managedReason,
+        canUninstall: !!receipt && !locked, uninstallReason: locked ?? (!receipt ? '仅支持卸载 DSH-Plus 安装的独立副本；系统安装与账户配置保持原样。' : null), ...(job ? { job: clone(job) } : {}) };
     }));
   }
   install(id) { return this.enqueue(id, 'install'); }
+  updateTool(id) { return this.enqueue(id, 'update'); }
+  reinstall(id) { return this.enqueue(id, 'reinstall'); }
   uninstall(id) { return this.enqueue(id, 'uninstall'); }
   enqueue(id, action) {
     if (this.closed) throw new Error('Installer is shutting down'); id = normalizeToolId(id);
@@ -113,31 +138,39 @@ export class ToolInstaller extends EventEmitter {
     const timer = setTimeout(() => controller.abort(new Error('安装任务超时。')), this.timeoutMs); timer.unref();
     let partial = '';
     const log = chunk => { partial += String(chunk); const lines = partial.split(/[\r\n]+/); partial = lines.pop().slice(-8192); for (const line of lines) if (line) job.logs.push(redactToolOutput(line, this.env).slice(0, 1000)); if (job.logs.length > 80) job.logs.splice(0, job.logs.length - 80); this.emit('job', clone(job)); };
-    const installEnv = Object.fromEntries(Object.entries(this.env).filter(([key]) => !/(?:key|token|secret|password|authorization|credential)/i.test(key)));
+    let installEnv = Object.fromEntries(Object.entries(this.env).filter(([key]) => !/(?:key|token|secret|password|authorization|credential)/i.test(key) && !/^(?:CODEX_HOME|CLAUDE_CONFIG_DIR|HERMES_HOME|GEMINI_CLI_HOME|PI_CODING_AGENT_DIR|OPENCODE_CONFIG(?:_DIR)?|OPENCLAW_CONFIG_PATH|OPENCLAW_STATE_DIR)$/i.test(key)));
     const execute = async (command, args, env = installEnv) => { if (controller.signal.aborted) throw controller.signal.reason ?? new Error('已取消'); return this.executor(command, args, { env, cwd: this.root, signal: controller.signal, onOutput: log }); };
     try {
-      this.update(job, { status: 'running', message: job.action === 'install' ? '正在安装' : '正在卸载', startedAt: new Date().toISOString() });
+      const labels = { install: '安装', update: '更新', reinstall: '重新安装', uninstall: '卸载' };
+      this.update(job, { status: 'running', message: '正在' + labels[job.action], startedAt: new Date().toISOString() });
       const tool = getTool(job.toolId), prefix = await this.safePrefix(tool.id);
       if (await this.isRunning(tool.id)) throw new Error('工具正在运行，请先结束会话后重试。');
+      const receipt = await this.receipt(tool.id);
       if (job.action === 'uninstall') {
-        if (!(await this.receipt(tool.id))) throw new Error('拒绝卸载外部安装或没有 DSH-Plus 安装凭据的工具。');
+        if (!receipt) throw new Error('拒绝卸载外部安装或没有 DSH-Plus 安装凭据的工具。');
         if (controller.signal.aborted) throw new Error('已取消'); await rm(prefix, { recursive: true, force: true });
       } else {
         const support = await this.support(tool); if (!support.supported) throw new Error(support.reason);
-        try { await lstat(prefix); if (!(await this.receipt(tool.id))) throw new Error('安装目录已有内容且不属于 DSH-Plus，拒绝覆盖。'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+        if (job.action !== 'install' && !receipt) throw new Error('仅支持更新或重装 DSH-Plus 安装的独立副本；请先安装独立副本。');
+        if (job.action === 'install' && receipt) throw new Error('独立副本已安装，请选择更新或重新安装。');
+        try { await lstat(prefix); if (!receipt) throw new Error('安装目录已有内容且不属于 DSH-Plus，拒绝覆盖。'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+        if (job.action === 'reinstall') { if (controller.signal.aborted) throw new Error('已取消'); await rm(prefix, { recursive: true, force: true }); }
         await mkdir(prefix, { recursive: true, mode: 0o700 });
-        await writeFile(join(prefix, 'dsh-install.json'), JSON.stringify({ owner: 'dsh-plus', toolId: tool.id, version: null }), { mode: 0o600 });
+        if (job.action !== 'update') await writeFile(join(prefix, 'dsh-install.json'), JSON.stringify({ owner: 'dsh-plus', toolId: tool.id, version: null }), { mode: 0o600 });
+        // Installer hooks and version probes must not read or migrate the user's account/configuration.
+        const installHome = join(prefix, '.install-home'); await mkdir(installHome, { recursive: true, mode: 0o700 });
+        installEnv = { ...installEnv, HOME: installHome, USERPROFILE: installHome, XDG_CONFIG_HOME: join(installHome, 'config'), XDG_DATA_HOME: join(installHome, 'data'), XDG_CACHE_HOME: join(installHome, 'cache'), APPDATA: join(installHome, 'AppData', 'Roaming'), LOCALAPPDATA: join(installHome, 'AppData', 'Local') };
         if (tool.installer === 'npm') {
           const npm = await this.npmCommand(); await execute(npm.command, [...npm.args, 'install', '--global', '--prefix', prefix, '--include=optional', '--engine-strict', '--no-audit', '--no-fund', ...tool.installArgs, tool.packageName + '@latest']);
         } else {
-          await execute(await this.findExecutable('uv'), ['tool', 'install', '--force', '--python', '3.14', tool.source], { ...installEnv, UV_TOOL_DIR: join(prefix, 'tools'), UV_TOOL_BIN_DIR: join(prefix, 'bin'), UV_PYTHON_INSTALL_DIR: join(prefix, 'python'), UV_NO_CONFIG: '1' });
+          await execute(await this.findExecutable('uv'), ['tool', 'install', '--force', ...(job.action === 'update' ? ['--upgrade'] : []), '--python', '3.14', tool.source], { ...installEnv, UV_TOOL_DIR: join(prefix, 'tools'), UV_TOOL_BIN_DIR: join(prefix, 'bin'), UV_PYTHON_INSTALL_DIR: join(prefix, 'python'), UV_NO_CONFIG: '1' });
         }
         if (controller.signal.aborted) throw new Error('已取消');
         const executable = this.managedExecutable(tool.id); if (!(await this.usable(executable))) throw new Error('安装命令已结束，但工具入口不可用。');
-        const launch = await this.resolveLaunch(tool.id); const result = await execute(launch.command, [...launch.args, '--version']); const version = redactToolOutput(result?.stdout ?? '', this.env).trim().slice(0, 200);
+        const launch = await this.resolveLaunch(tool.id, { managed: true }); const result = await execute(launch.command, [...launch.args, '--version']); const version = redactToolOutput(result?.stdout ?? '', this.env).trim().slice(0, 200);
         await writeFile(join(prefix, 'dsh-install.json'), JSON.stringify({ owner: 'dsh-plus', toolId: tool.id, version: version || null, installedAt: new Date().toISOString() }), { mode: 0o600 });
       }
-      if (!controller.signal.aborted) this.update(job, { status: 'succeeded', message: job.action === 'install' ? '安装完成' : '卸载完成，用户配置已保留', finishedAt: new Date().toISOString() });
+      if (!controller.signal.aborted) this.update(job, { status: 'succeeded', message: labels[job.action] + '完成，系统安装与用户配置已保留', finishedAt: new Date().toISOString() });
     } catch (error) {
       if (job.status !== 'cancelled') this.update(job, { status: 'failed', error: redactToolOutput(controller.signal.aborted ? controller.signal.reason?.message ?? '任务已中止或超时' : error.message, this.env).slice(0, 1200), message: '操作失败', finishedAt: new Date().toISOString() });
     } finally { if (partial) log('\n'); clearTimeout(timer); this.controllers.delete(job.id); }

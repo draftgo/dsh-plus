@@ -3,7 +3,6 @@ package cn.draftgo.dshplus.link
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
@@ -11,6 +10,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.webkit.WebViewAssetLoader
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -33,6 +33,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private lateinit var bridge: LinkBridge
     private var pendingBootstrap: String? = null
+    private var workbenchIdentity: Identity? = null
+    private var microphoneRequest: android.webkit.PermissionRequest? = null
+    private var uploadCallback: android.webkit.ValueCallback<Array<android.net.Uri>>? = null
+    private val microphonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        microphoneRequest?.let { request -> if (granted && request.origin.toString().trimEnd('/') == workbenchIdentity?.url) request.grant(arrayOf(android.webkit.PermissionRequest.RESOURCE_AUDIO_CAPTURE)) else request.deny() }
+        microphoneRequest = null
+    }
+    private val uploadPicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        uploadCallback?.onReceiveValue(android.webkit.WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data))
+        uploadCallback = null
+    }
 
     private val scanner = registerForActivityResult(ScanContract()) { result ->
         if (result.contents != null) handlePairUri(result.contents)
@@ -53,6 +64,8 @@ class MainActivity : AppCompatActivity() {
         webView.settings.allowContentAccess = false
         webView.settings.setSupportMultipleWindows(false)
         webView.settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+        android.webkit.CookieManager.getInstance().setAcceptCookie(true)
+        android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false)
         webView.webViewClient = localClient()
         webView.addJavascriptInterface(bridge, "LinkNative")
         webView.loadUrl(START_URL)
@@ -66,6 +79,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        microphoneRequest?.deny(); uploadCallback?.onReceiveValue(null)
         bridge.close()
         webView.removeJavascriptInterface("LinkNative")
         webView.destroy()
@@ -96,15 +110,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handlePairUri(raw: String) {
-        val parsed = runCatching { Uri.parse(raw) }.getOrNull() ?: return
-        if (parsed.scheme != "dshlink" || parsed.host != "pair") return
-        val url = parsed.getQueryParameter("url") ?: return
-        val pin = parsed.getQueryParameter("pin") ?: return
-        val code = parsed.getQueryParameter("code") ?: return
-        val name = parsed.getQueryParameter("name")
+        val parsed = runCatching { parsePairingLink(raw) }.getOrElse {
+            android.widget.Toast.makeText(this, it.message ?: "配对信息无效", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
         val value = JSONObject().apply {
-            put("url", url); put("pin", pin); put("code", code)
-            if (name != null) put("name", name)
+            put("url", parsed.url); put("pin", parsed.pin); put("code", parsed.code)
+            if (parsed.name.isNotEmpty()) put("name", parsed.name)
         }.toString()
         val saved = bridge.saveIdentity(value)
         val outcome = JSONObject(saved)
@@ -123,13 +135,85 @@ class MainActivity : AppCompatActivity() {
 
     fun launchScanner() {
         runOnUiThread { scanner.launch(ScanOptions().apply {
-            setPrompt("扫描 DSH Plus 配对二维码")
+            setCaptureActivity(LinkScannerActivity::class.java)
+            setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            setPrompt("")
             setBeepEnabled(false)
-            setOrientationLocked(false)
+            setOrientationLocked(true)
         }) }
     }
 
     fun deliverResult(script: String) { webView.evaluateJavascript(script, null) }
+
+    fun openWorkbench(identity: Identity, cookie: String) {
+        runOnUiThread {
+            workbenchIdentity = identity
+            pendingBootstrap = null
+            webView.removeJavascriptInterface("LinkNative")
+            webView.webViewClient = workbenchClient(identity)
+            webView.webChromeClient = object : android.webkit.WebChromeClient() {
+                override fun onPermissionRequest(request: android.webkit.PermissionRequest) {
+                    runOnUiThread {
+                        if (request.origin.toString().trimEnd('/') != identity.url || !request.resources.contains(android.webkit.PermissionRequest.RESOURCE_AUDIO_CAPTURE)) { request.deny(); return@runOnUiThread }
+                        microphoneRequest?.deny(); microphoneRequest = request
+                        microphonePermission.launch(android.Manifest.permission.RECORD_AUDIO)
+                    }
+                }
+                override fun onPermissionRequestCanceled(request: android.webkit.PermissionRequest) { if (microphoneRequest === request) microphoneRequest = null }
+                override fun onShowFileChooser(view: WebView, callback: android.webkit.ValueCallback<Array<android.net.Uri>>, params: FileChooserParams): Boolean {
+                    uploadCallback?.onReceiveValue(null); uploadCallback = callback
+                    return runCatching { uploadPicker.launch(params.createIntent()); true }.getOrElse { uploadCallback?.onReceiveValue(null); uploadCallback = null; false }
+                }
+            }
+            android.webkit.CookieManager.getInstance().setCookie(identity.url + "/link/workbench/", cookie) { accepted ->
+                if (accepted) webView.loadUrl(identity.url + "/link/workbench/")
+                else workbenchFailed("无法保存工作台连接，请重试")
+            }
+        }
+    }
+
+    private fun workbenchClient(identity: Identity) = object : WebViewClient() {
+        private fun allowed(uri: android.net.Uri): Boolean = runCatching {
+            val target = URI(uri.toString()); val host = URI(identity.url)
+            target.scheme == "https" && target.host.equals(host.host, true) && target.port == host.port && target.rawUserInfo == null && target.path.startsWith("/link/workbench/")
+        }.getOrDefault(false)
+        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+            if (allowed(request.url)) return false
+            if (request.url.toString() == identity.url + "/link/") { returnToPairing(); return true }
+            if (request.url.scheme in listOf("https", "http", "mailto")) runCatching { startActivity(Intent(Intent.ACTION_VIEW, request.url)) }
+            return true
+        }
+        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+            if (allowed(request.url) || request.url.scheme in listOf("blob", "data")) return null
+            return WebResourceResponse("text/plain", "UTF-8", 403, "Forbidden", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
+        }
+        override fun onReceivedSslError(view: WebView, handler: android.webkit.SslErrorHandler, error: android.net.http.SslError) {
+            // LAN self-signed certificates are trusted only by the QR's exact SPKI anchor.
+            val trusted = identity.pin.isNotEmpty() && allowed(android.net.Uri.parse(error.url)) && runCatching {
+                val bytes = android.net.http.SslCertificate.saveState(error.certificate).getByteArray("x509-certificate") ?: return@runCatching false
+                val cert = java.security.cert.CertificateFactory.getInstance("X.509").generateCertificate(java.io.ByteArrayInputStream(bytes)) as java.security.cert.X509Certificate
+                cert.checkValidity()
+                MessageDigest.isEqual(MessageDigest.getInstance("SHA-256").digest(cert.publicKey.encoded), Base64.getDecoder().decode(identity.pin))
+            }.getOrDefault(false)
+            if (trusted) handler.proceed() else handler.cancel()
+        }
+        override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
+            if (request.isForMainFrame && response.statusCode == 401) returnToPairing()
+        }
+    }
+
+    private fun returnToPairing() {
+        bridge.clearIdentity()
+        workbenchIdentity = null; webView.stopLoading()
+        webView.webViewClient = localClient(); webView.webChromeClient = android.webkit.WebChromeClient()
+        webView.addJavascriptInterface(bridge, "LinkNative"); webView.loadUrl(START_URL)
+    }
+    fun workbenchFailed(message: String) {
+        runOnUiThread {
+            if (workbenchIdentity != null) { returnToPairing(); android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show() }
+            else webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('link:workbench-error',{detail:${JSONObject.quote(message)}}));", null)
+        }
+    }
 }
 
 class LinkBridge(private val context: MainActivity, private val onIdentity: (String) -> Unit) {
@@ -167,6 +251,26 @@ class LinkBridge(private val context: MainActivity, private val onIdentity: (Str
     fun scan(): String { context.launchScanner(); return JSONObject().put("ok", true).toString() }
 
     @JavascriptInterface
+    fun openWorkbench(): String {
+        val identity = store.read() ?: return error("请先配对工作台")
+        if (identity.token.isEmpty()) return error("请先在电脑上允许连接")
+        executor.execute {
+            runCatching {
+                val client = clientFor(identity)
+                val request = Request.Builder().url(identity.url + "/link/api/workbench").header("Authorization", "Bearer ${identity.token}").post("{}".toRequestBody("application/json".toMediaType())).build()
+                client.newCall(request).execute().use { result ->
+                    val body = JSONObject(result.body?.string() ?: "{}")
+                    require(result.isSuccessful) { body.optString("error", "工作台连接失败") }
+                    require(body.optString("url") == "/link/workbench/") { "工作台地址无效" }
+                    val cookie = result.headers.values("Set-Cookie").singleOrNull { it.contains("Path=/link/workbench/", true) && it.contains("HttpOnly", true) } ?: throw IllegalStateException("工作台未返回设备会话")
+                    context.openWorkbench(identity, cookie)
+                }
+            }.onFailure { context.workbenchFailed(connectionFailureMessage(it, identity.url, identity.pin.isNotEmpty())) }
+        }
+        return JSONObject().put("ok", true).toString()
+    }
+
+    @JavascriptInterface
     fun request(raw: String): String {
         val id = runCatching { JSONObject(raw).optString("id") }.getOrDefault("")
         executor.execute {
@@ -179,18 +283,8 @@ class LinkBridge(private val context: MainActivity, private val onIdentity: (Str
         return ""
     }
 
-    private fun executeRequest(raw: String): String {
-        return try {
-            val input = JSONObject(raw)
-            val id = input.optString("id")
-            val identity = store.read() ?: return response(id, 0, "未配对")
-            val method = input.optString("method").uppercase()
-            if (method != "GET" && method != "POST") return response(id, 0, "仅支持 GET/POST")
-            val path = input.optString("path")
-            if (!Regex("^/link/api/[A-Za-z0-9/_-]+$").matches(path)) return response(id, 0, "路径未授权")
-            val uri = URI(identity.url + path)
-            if (uri.scheme != "https" || uri.host.isNullOrBlank() || uri.userInfo != null) return response(id, 0, "仅支持 HTTPS 主机")
-            val client = clients.getOrPut(identity.hostKey) {
+    private fun clientFor(identity: Identity): OkHttpClient = clients.getOrPut(identity.hostKey) {
+            val uri = URI(identity.url)
             val builder = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
                 .connectTimeout(12, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS)
             if (identity.pin.isNotEmpty()) {
@@ -222,6 +316,25 @@ class LinkBridge(private val context: MainActivity, private val onIdentity: (Str
             }
             builder.build()
             }
+
+    private fun executeRequest(raw: String): String {
+        var requestId = ""
+        var hostUrl = ""
+        var pinned = false
+        return try {
+            val input = JSONObject(raw)
+            val id = input.optString("id")
+            requestId = id
+            val identity = store.read() ?: return response(id, 0, "未配对")
+            hostUrl = identity.url
+            pinned = identity.pin.isNotEmpty()
+            val method = input.optString("method").uppercase()
+            if (method != "GET" && method != "POST") return response(id, 0, "仅支持 GET/POST")
+            val path = input.optString("path")
+            if (!Regex("^/link/api/[A-Za-z0-9/_-]+$").matches(path)) return response(id, 0, "路径未授权")
+            val uri = URI(identity.url + path)
+            if (uri.scheme != "https" || uri.host.isNullOrBlank() || uri.userInfo != null) return response(id, 0, "仅支持 HTTPS 主机")
+            val client = clientFor(identity)
             val requestBuilder = Request.Builder().url(uri.toURL()).header("Accept", "application/json")
             if (identity.token.isNotEmpty()) requestBuilder.header("Authorization", "Bearer ${identity.token}")
             val body = input.optJSONObject("body")?.toString()?.toRequestBody("application/json".toMediaType())
@@ -231,7 +344,7 @@ class LinkBridge(private val context: MainActivity, private val onIdentity: (Str
             client.newCall(requestBuilder.build()).execute().use { result ->
                 response(id, result.code, result.body?.string() ?: "")
             }
-        } catch (e: Exception) { response("", 0, e.message ?: "连接失败") }
+        } catch (e: Exception) { response(requestId, 0, connectionFailureMessage(e, hostUrl, pinned)) }
     }
 
     private fun response(id: String, status: Int, body: String): String = JSONObject().apply {

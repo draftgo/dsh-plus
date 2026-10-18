@@ -18,6 +18,12 @@ const speakerAssets = {"on": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=
 function Speaker({ active }) { return <span className="voice-speaker-icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: speakerAssets[active ? 'on' : 'off'] }} />; }
 const callAsset = "<svg viewBox=\"0 0 24 24\" fill=\"none\"><path d=\"M3 8.25v7.5M7.5 5.75v12.5M12 3.25v17.5M16.5 5.75v12.5M21 8.25v7.5\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke=\"currentColor\"/></svg>";
 function CallIcon() { return <span className="voice-speaker-icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: callAsset }} />; }
+export const DEFAULT_TTS_SPEED = 1.2;
+const TTS_SPEED_MIN = 0.25, TTS_SPEED_MAX = 4;
+export function normalizeTtsSpeed(value) {
+  const speed = Number(value);
+  return Number.isFinite(speed) && speed >= TTS_SPEED_MIN && speed <= TTS_SPEED_MAX ? Math.round(speed * 100) / 100 : DEFAULT_TTS_SPEED;
+}
 const phaseLabels = { idle: '准备中', starting: '正在连接', listening: '正在聆听', transcribing: '正在识别', thinking: '正在思考', speaking: '正在回应', waiting: '等待授权或交互' };
 function Microphone({ muted = false }) { return <span className={'voice-microphone-icon' + (muted ? ' voice-microphone-muted' : '')} aria-hidden="true"><IconMicrophoneOutlineMedium size={18} /></span>; }
 function CallOrb({ state }) {
@@ -75,8 +81,8 @@ function VoiceActivity({ controller, sessionId, inputActions, locked, onActiveCh
     {message && <span className="voice-inline-error" role="alert">{message}</span>}
   </div>;
 }
-function draftFrom(config) {
-  const endpoint = name => ({ providerId: config[name]?.providerId || '', baseURL: config[name]?.baseURL || '', model: config[name]?.model || '', apiKey: '', ...(name === 'tts' ? { voice: config.tts?.voice || '' } : { protocol: config.asr?.protocol || 'transcriptions-sse' }) });
+export function draftFrom(config) {
+  const endpoint = name => ({ providerId: config[name]?.providerId || '', baseURL: config[name]?.baseURL || '', model: config[name]?.model || '', apiKey: '', ...(name === 'tts' ? { voice: config.tts?.voice || '', speed: normalizeTtsSpeed(config.tts?.speed), protocol: config.tts?.protocol || (/^(?:stepaudio-(?:2\.5|3)-tts|stepfun-2\.5-tts|step-tts-(?:2|mini))$/iu.test(config.tts?.model || '') ? 'step-speech' : 'speech') } : { protocol: config.asr?.protocol || 'transcriptions-sse', realtime: config.asr?.realtime || { url: '', query: {} } }) });
   return { dictation: !!config.dictation, readAloud: !!config.readAloud, call: !!config.call, asr: endpoint('asr'), tts: endpoint('tts') };
 }
 async function voiceCatalog(action, args = {}, signal) {
@@ -115,14 +121,17 @@ function ProviderSettings({ name, draft, config, providers, update, clearKey, to
   }, [providerId, name, revision]);
   const providerOptions = [{ value: '', label: '独立配置', hint: '手动填写服务与密钥' }, ...providers.map(item => ({ value: item.id, label: item.name || item.id, hint: item.configured ? '复用已有供应商' : '供应商尚未配置', disabled: !item.configured }))];
   if (providerId && !provider) providerOptions.push({ value: providerId, label: providerId, hint: '当前供应商暂不可用' });
-  return <fieldset disabled={disabled} className="voice-provider-settings"><legend>{name === 'asr' ? 'ASR · 语音识别' : 'TTS · 语音合成'}</legend><p className="voice-provider-hint">{name === 'asr' ? '普通 HTTP 为分段转写；SSE 增量返回；Step WSS 连续发送音频'  : '兼容语音合成 API，流式 PCM 24 kHz 单声道'}</p><VoiceSelect label="模型供应商" value={providerId} options={providerOptions} disabled={disabled} onChange={id => { update({ providerId: id, baseURL: providers.find(item => item.id === id)?.baseURL || '', model: '', apiKey: '' }); }} />
-    {name === 'asr' && <VoiceSelect label="识别协议" value={draft.protocol} options={[{value:'transcriptions-sse',label:'OpenAI 兼容流式转录（推荐）',hint:'兼容 MiMo、Step；增量返回识别文字'},{value:'transcriptions',label:'普通 HTTP',hint:'停说后提交完整语段'},{value:'mimo-sse',label:'MiMo SSE',hint:'分段上传后增量返回'},{value:'step-sse',label:'Step SSE',hint:'分段上传后增量返回'},{value:'step-websocket',label:'Step 原生 WSS',hint:'100 ms 音频帧连续识别，需服务支持'}]} disabled={disabled} onChange={protocol=>update({protocol})} />}
+  return <fieldset disabled={disabled} className="voice-provider-settings"><legend>{name === 'asr' ? 'ASR · 语音识别' : 'TTS · 语音合成'}</legend><p className="voice-provider-hint">{name === 'asr' ? '默认使用 OpenAI 兼容接口；WebSocket 持续发送音频，HTTP / SSE 分段上传' : '兼容语音合成 API，流式 PCM 24 kHz 单声道'}</p><VoiceSelect label="模型供应商" value={providerId} options={providerOptions} disabled={disabled} onChange={id => { update({ providerId: id, baseURL: providers.find(item => item.id === id)?.baseURL || '', model: '', apiKey: '', protocol: name === 'asr' ? 'transcriptions-sse' : 'speech', ...(name === 'asr' ? { realtime: { url: '', query: {} } } : { voice: '' }) }); }} />
+    {name === 'asr' && <VoiceSelect label="识别协议" value={draft.protocol} options={[{value:'transcriptions-sse',label:'OpenAI 兼容转录 SSE',hint:'分段上传后增量返回文字，需模型支持'},{value:'transcriptions',label:'OpenAI 兼容转录 HTTP',hint:'完整语段上传后返回文字'},{value:'openai-websocket',label:'OpenAI 兼容实时转录 WSS',hint:'持续 PCM 输入，默认 /realtime?intent=transcription'},{value:'mimo-sse',label:'MiMo SSE 扩展',hint:'仅供应商明确支持时使用'},{value:'step-sse',label:'Step SSE 扩展',hint:'仅供应商支持 /audio/asr/sse 时使用'},{value:'step-websocket',label:'Step 实时转录协议扩展',hint:'持续 PCM 输入；与 OpenAI 会话、文本事件格式不同'}]} disabled={disabled} onChange={protocol=>update({protocol})} />}
+    {name === 'asr' && ['step-websocket', 'openai-websocket'].includes(draft.protocol) && <label>WebSocket 地址（可选）<input type="url" autoComplete="off" placeholder="留空使用协议默认地址；可填写完整 wss:// 地址" value={draft.realtime?.url || ''} onChange={event => update({ realtime: { url: event.target.value, query: {} } })} /><small>网关路由参数可写入地址；API Key 仅通过服务端请求头发送。</small></label>}
+    {name === 'tts' && <VoiceSelect label="合成协议" value={draft.protocol} options={[{value:'speech',label:'OpenAI 兼容语音合成',hint:'标准 /audio/speech，流式 PCM'},{value:'step-speech',label:'Step 语音合成扩展',hint:'仅对支持的服务发送采样率和流式扩展字段'}]} disabled={disabled} onChange={protocol => update({protocol})} />}
     <label>API 地址<input type="url" inputMode="url" autoComplete="off" readOnly={!!providerId} placeholder="https://api.example.com/v1" value={provider?.baseURL || draft.baseURL} onChange={event => update({ baseURL: event.target.value })} /></label>
     {providerId && <p className="voice-provider-hint">使用该供应商已有的连接配置，密钥不会返回浏览器。</p>}
     {providerId && <div className="voice-model-actions"><span className="voice-field-label">模型列表</span><button type="button" className="voice-text-button" disabled={loading || disabled} onClick={() => setRevision(value => value + 1)}>{loading ? '获取中…' : '重新获取'}</button><button type="button" className="voice-text-button" onClick={() => setManualModel(value => !value)}>{manualModel ? '从列表选择' : '手动填写'}</button></div>}
     {providerId && !manualModel ? <><VoiceSelect label="模型" value={draft.model} options={models.map(model => ({ value: model.id, label: model.name || model.id, hint: model.inferred ? '按模型名称推断能力' : model.id }))} placeholder={loading ? '正在获取模型…' : '选择模型'} disabled={disabled || loading} onChange={model => update({ model })} />{!loading && !models.length && <p className="voice-provider-hint">未找到对应语音模型，可手动填写模型 ID。</p>}</> : <label>模型<input type="text" autoComplete="off" placeholder={name === 'asr' ? '填写转录模型 ID' : '填写语音合成模型 ID'} value={draft.model} onChange={event => update({ model: event.target.value })} /></label>}
     {error && <p role="status" className="voice-settings-error">{error}；可手动填写模型 ID。</p>}
-    {name === 'tts' && <label>音色<input type="text" autoComplete="off" placeholder={/^stepaudio-/u.test(draft.model) ? "默认 cixingnansheng" : "默认 alloy；可填写模型支持的 voice"} value={draft.voice} onChange={event => update({ voice: event.target.value })} /></label>}
+    {name === 'tts' && <label>音色<input type="text" autoComplete="off" placeholder={draft.protocol === 'step-speech' ? '默认 cixingnansheng' : '默认 alloy；可填写模型支持的 voice'} value={draft.voice} onChange={event => update({ voice: event.target.value })} /></label>}
+    {name === 'tts' && <label className="voice-speed-field"><span className="voice-field-label">语速 <output>{normalizeTtsSpeed(draft.speed).toFixed(2)}×</output></span><input type="range" min={TTS_SPEED_MIN} max={TTS_SPEED_MAX} step="0.05" value={normalizeTtsSpeed(draft.speed)} aria-label="语速" onChange={event => update({ speed: normalizeTtsSpeed(event.target.value) })} /></label>}
     {!providerId && <label>API Key<div className="voice-key-field"><input type="password" autoComplete="new-password" spellCheck={false} placeholder={clearKey ? '保存后清除密钥' : config?.apiKeyConfigured ? '已配置，留空保留现有密钥' : '填写 API Key'} value={draft.apiKey} onChange={event => update({ apiKey: event.target.value })} />{(config?.apiKeyConfigured || clearKey) && <button type="button" onClick={toggleClear}>{clearKey ? '撤销清除' : '清除密钥'}</button>}</div></label>}
   </fieldset>;
 }

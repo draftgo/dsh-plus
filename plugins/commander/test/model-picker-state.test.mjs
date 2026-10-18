@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {availableTools, currentToolId, providersForTool, selectionReasoningEffort} from '../client/model-picker-state.mjs';
+import {availableTools, currentToolId, providersForTool, selectionReasoningEffort, providerAllowsTool} from '../client/model-picker-state.mjs';
 const route={tool:'codex',providerId:'routergo',providerName:'RouterGo',modelId:'opaque:/not/a/provider+model',nativeModelId:'native/model'};
 const groups=[{id:'routergo',name:'RouterGo',models:[{id:'deepseek-test',name:'DS'}]},{id:'commander-codex',name:'Codex',models:[{id:route.modelId,name:'Codex test'},{id:'unmapped',name:'Do not guess'}]},{id:'commander-claude',models:[{id:route.modelId,name:'Other tool'}]}];
 test('reasoning choices follow exact capabilities instead of stale session state',()=>{
@@ -27,4 +27,16 @@ test('native tools use route metadata and preserve opaque model IDs unchanged',(
  const providers=providersForTool(groups,{routes:[route,{...route,tool:'claude',providerId:'wrong'}]},'codex');
  assert.deepEqual(providers.map(x=>x.id),['routergo']); assert.equal(providers[0].models.length,1); assert.equal(providers[0].models[0].model.id,route.modelId); assert.equal(providers[0].models[0].nativeModelId,'native/model');
  assert.deepEqual(providersForTool(groups,{},'codex'),[]);
+});
+test('subscription ownership restricts only the selected provider, including the built-in tool', () => {
+ const identity={id:'openai-codex',name:'ChatGPT',authMode:'subscription',harnessTools:['codex'],tools:['codex'],nativeRequired:true};
+ const catalog={providers:[identity],routes:[]};
+ const all=[...groups,{id:'openai-codex',name:'ChatGPT',models:[{id:'subscription-model'}]}];
+ assert.equal(providerAllowsTool(identity,'codex'),true);
+ for(const tool of ['deepseek','claude','pi'])assert.equal(providerAllowsTool(identity,tool),false);
+ assert.deepEqual(providersForTool(all,catalog,'deepseek').map(row=>row.id),['routergo']);
+ assert.deepEqual(providersForTool(all,catalog,'claude'),[]);
+ const row=providersForTool(all,catalog,'codex')[0];
+ assert.equal(row.id,'openai-codex'); assert.equal(row.nativeRequired,true); assert.deepEqual(row.models,[]);
+ assert.equal(providerAllowsTool({id:'routergo'},'claude'),true);
 });

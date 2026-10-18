@@ -91,6 +91,11 @@ export async function mountWeb(ctx, commander, config = {}) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Expected an object');
     const { action } = input;
     if (action === 'state') return state();
+    if (action === 'binding') {
+      const ownerSessionId = text(input.harnessSessionId, 'harnessSessionId', 200);
+      const session = commander.list().find(item => !item.archived && (!item.parentId || item.harnessAdopted) && item.ownerSessionId === ownerSessionId);
+      return { bound: !!session, ...(session ? { id: session.id, cursor: session.cursor, provider: session.provider, model: session.model ?? 'native-default', route: session.route ? { providerId: session.route.providerId, model: session.route.model } : null } : {}) };
+    }
     if (action === 'browse') return projects.browse(input);
     if (action === 'clone') return projects.clone(input);
     if (action === 'dismiss') {

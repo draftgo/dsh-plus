@@ -4,6 +4,35 @@ import { networkInterfaces } from 'node:os';
 import { isIP } from 'node:net';
 
 export const localAddresses = () => [...new Set(Object.values(networkInterfaces()).flatMap(items => (items ?? []).filter(x => !x.internal && !x.address.includes('%')).map(x => x.address)))];
+
+// Discovery is deliberately narrower than the HTTP Host allowlist: container
+// networks and IPv6 link-local addresses are not useful phone pairing targets.
+const virtualInterface = /^(?:docker\d+|br-[0-9a-f]+|veth.*|virbr\d+(?:-nic)?|vboxnet\d+|vmnet\d+|cni\d+|flannel.*|podman\d+)$|^vEthernet \((?:Default Switch|WSL.*|Docker.*)\)$/i;
+export function connectionAddresses(host = '::', interfaces = networkInterfaces()) {
+  if (host !== '0.0.0.0' && host !== '::') return [host];
+  const ipv4 = new Set(), ipv6 = new Set();
+  for (const [name, entries] of Object.entries(interfaces)) {
+    if (virtualInterface.test(name)) continue;
+    for (const entry of entries ?? []) {
+      if (entry.internal || entry.address.includes('%')) continue;
+      const family = isIP(entry.address);
+      if (family === 4) {
+        const [a, b] = entry.address.split('.').map(Number);
+        if (a === 0 || a === 127 || a >= 224 || (a === 169 && b === 254)) continue;
+        ipv4.add(entry.address);
+      } else if (family === 6 && host === '::') {
+        const address = new URL(`https://[${entry.address}]`).hostname.slice(1, -1);
+        if (address === '::' || address === '::1' || /^fe[89ab][0-9a-f]:|^ff/i.test(address)) continue;
+        ipv6.add(address);
+      }
+    }
+  }
+  const privateIpv4 = address => {
+    const [a, b] = address.split('.').map(Number);
+    return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+  };
+  return [...[...ipv4].filter(privateIpv4), ...[...ipv4].filter(address => !privateIpv4(address)), ...ipv6];
+}
 export const authority = (address, port) => `${isIP(address) === 6 ? `[${address}]` : address}:${port}`;
 
 export function validateConfig(input, prior) {
@@ -41,7 +70,7 @@ async function body(request) {
 }
 
 /** Separate encrypted carrier: it exposes only Link's allowlist, never the Host admin API. */
-export async function listen({ identity, config, webRoot, store, dispatch, onError }) {
+export async function listen({ identity, config, webRoot, store, dispatch, workbench, onError }) {
   const rates = new Map();
   let active = true;
   const send = (response, status, value, type = 'application/json; charset=utf-8') => {
@@ -66,6 +95,10 @@ export async function listen({ identity, config, webRoot, store, dispatch, onErr
       const rate = rates.get(ip)?.tick === tick ? rates.get(ip) : { tick, count: 0, pairs: 0 };
       rates.set(ip, rate);
       if (++rate.count > 600) throw fail('请求过多，请稍后重试', 429);
+      if (url.pathname.startsWith('/link/workbench/')) {
+        if (!workbench) throw fail('网页工作台尚未就绪', 503);
+        return await workbench.handle(req, res, url, headers);
+      }
       if (req.method === 'GET') {
         if (url.pathname === '/link/api/info') return send(res, 200, { name: 'DSH Link', version: '0.1.0' });
         const file = { '/link': 'index.html', '/link/': 'index.html', '/link/index.html': 'index.html', '/link/app.js': 'app.js', '/link/app.css': 'app.css' }[url.pathname];
@@ -85,15 +118,23 @@ export async function listen({ identity, config, webRoot, store, dispatch, onErr
         const input = await body(req);
         return send(res, 200, store.poll(input.requestId, input.pollToken));
       }
-      if (url.pathname !== '/link/api/rpc') throw fail('未找到', 404);
+      if (!['/link/api/rpc', '/link/api/workbench'].includes(url.pathname)) throw fail('未找到', 404);
       const device = store.authenticate(req.headers.authorization?.replace(/^Bearer\s+/i, ''));
       if (!device) throw fail('设备授权已失效，请重新配对', 401);
+      if (url.pathname === '/link/api/workbench') {
+        if (!workbench) throw fail('网页工作台尚未就绪', 503);
+        await body(req);
+        return send(res, 200, workbench.begin(device, res));
+      }
       const input = await body(req);
       if (!active || !store.state.devices.some(d => d.id === device.id)) throw fail('设备授权已失效', 401);
       return send(res, 200, await dispatch(input, device));
-    } catch (e) { send(res, e.status ?? 400, { error: e.message }); }
+    } catch (e) { if (res.headersSent) res.destroy(); else send(res, e.status ?? 400, { error: e.message }); }
   });
-  server.requestTimeout = 15_000; server.headersTimeout = 10_000; server.keepAliveTimeout = 5_000;
+  // Mobile links can pause while a request body crosses a high-latency network;
+  // keep this below the reverse proxy's 120s upstream limits while allowing
+  // normal workbench API and uplink requests to finish without premature 408s.
+  server.requestTimeout = 60_000; server.headersTimeout = 15_000; server.keepAliveTimeout = 10_000;
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(config.port, config.host, () => { server.off('error', reject); resolve(); });
@@ -101,6 +142,7 @@ export async function listen({ identity, config, webRoot, store, dispatch, onErr
   server.on('error', onError);
   return {
     port: server.address().port,
-    close: async () => { active = false; server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); rates.clear(); },
+    timeouts: { request: server.requestTimeout, headers: server.headersTimeout, keepAlive: server.keepAliveTimeout },
+    close: async () => { active = false; await workbench?.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); rates.clear(); },
   };
 }

@@ -1,6 +1,6 @@
 # DSH Plus 移动端
 
-`android/` 是 Kotlin 原生 Android 壳，使用 WebViewAssetLoader 加载共享的 `plugins/link/dist/web/`，所有主机请求通过原生 OkHttp 适配器，不加载远程网页。
+`android/` 是 Kotlin 原生 Android 壳。配对、扫码使用 `WebViewAssetLoader` 中的本地 Link 页面；电脑允许设备后，App 打开同源 `/link/workbench/` 官方网页工作台，通过配对主机的系统 HTTPS 信任或二维码 SPKI 验证加载资源。网页中的完整 Harness UI、设置、命令和会话不复制到 App。语音需要 Android 麦克风授权；文件选择器由原生壳呈现。
 
 ## 构建
 
@@ -18,10 +18,11 @@ debug 包仅用于本轮验收。正式分发需使用自己的 release keystore
 
 ## 配对与安全边界
 
-- 桌面显示 `dshlink://pair?url=<HTTPS_BASE>&pin=<BASE64_SHA256_SPKI>&code=<一次性码>`，App 支持扫码或系统深链打开；摄像头不可用时保留共享页面的粘贴流程。
+- 本地桌面显示 `dshlink://pair?url=<HTTPS_BASE>&pin=<BASE64_SHA256_SPKI>&code=<一次性码>`；云工作台优先域名 HTTPS 配对页，更新后的 App 同时识别两类二维码。公网使用系统证书链和标准主机名校验，局域网使用 QR SPKI。摄像头不可用时可返回粘贴完整配对地址。
 - 局域网使用二维码固定主机 SPKI 公钥，仅严格匹配该公钥且有效的证书通过；pin 模式仅允许配对 URL 的主机名，接受该公钥对应证书的 SAN 与局域网 IP 不同。公网无 pin 时使用系统证书信任链及标准主机名校验。禁止 HTTP 和重定向，不使用全局信任所有证书。
 - Android Keystore 中的 AES-GCM 密钥加密配对身份，应用备份关闭；清除设备身份会删除本机令牌和密钥。服务器端撤销仍由桌面执行。
-- JS bridge 仅存在于本地 appassets 页面；所有外部导航转系统浏览器，文件访问、混合内容和远程子资源禁用。原生网络仅接受已配对 HTTPS 主机的 `/link/api/*` GET / POST。
+- JS bridge 仅存在于本地配对页；跳入工作台前移除。工作台导航和子资源仅允许已配对 HTTPS 主机的 `/link/workbench/`，同源资源由 Link TLS listener 提供；其它外部导航交给系统浏览器。局域网自签证书只接受扫码中的精确 SPKI 与有效证书。
+- 工作台 HttpOnly cookie 由已配对设备令牌换取，限定 `/link/workbench/` 路径。Android 原生 JSON 网络桥仍限制为 `/link/api/*`，工作台本身使用 WebView 同源 cookie 请求。
 - 前台轮询由共享 UI 管理；本版本不承诺后台保活或系统强制停止后的实时接收。
 - 一次安全保存一台主机；换主机或地址变化时，在配对页选择“清除并重新配对”。清除本机凭据不等于在主机撤销旧设备，撤销需从桌面设备列表执行。
 
@@ -33,6 +34,12 @@ debug 包仅用于本轮验收。正式分发需使用自己的 release keystore
 
 ## 当前验证
 
+2026-10-17 第四轮：配对后改为复用完整网页工作台，包含输入命令、语音配置、模型、Agent 预设和内置插件设置；官方网页 UI、组件状态和配置不另维护移动副本。Android 编译通过，真实配对浏览器已打开工作台、设置项与 `/help` 输入通过；无横向溢出。APK 尚未重打包，已安装版本不包含新 WebView 工作台桥接。
+
+2026-10-17 第三轮：共享 Web 默认进入跨项目「最近」，侧边栏管理会话、新建和连接；移除底栏和首页项目选择，增加搜索、时间分组、运行中筛选、会话草稿保留及全页深浅色。
+
+2026-10-17：移动 Web 改为紧凑配对、工作台、会话和连接管理；`/mobile` 作为兼容入口跳转到真实 `/link/` 配对流程。原生扫码页改用专用 JourneyApps 界面，含返回、手电筒、相机权限恢复和失败重试；网络超时、DNS 与证书错误分别反馈。已执行 Kotlin 编译和异常映射验证；本轮等待前端验收后再生成新 APK，已有 APK 不包含这些更新。
+
 2026-10-16：已安装隔离 JDK 17、Android SDK 35 与 Gradle 8.9，真实 `assembleDebug` 构建成功。验收包位于 `artifacts/android/dsh-plus-link-0.1.0-debug.apk`，分发下载见仓库 Releases；源码目录的原始产物位于 `android/app/build/outputs/apk/debug/app-debug.apk`。
 
-共享网页包含在 APK 离线 assets 内。当前没有连接 Android 设备，未完成真机安装、扫码、软键盘、证书拒绝提示或切后台恢复验收。debug APK 有调试签名，不是正式 release 签名包。
+本地配对网页包含在 APK 离线 assets 内。当前没有连接 Android 设备，未完成真机安装、扫码、软键盘、WebView 麦克风、证书拒绝提示或切后台恢复验收。debug APK 有调试签名，不是正式 release 签名包。

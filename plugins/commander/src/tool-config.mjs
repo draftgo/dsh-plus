@@ -5,6 +5,7 @@ import * as TOML from 'smol-toml';
 import { parseDocument } from 'yaml';
 import { parse as parseJsonc, modify, applyEdits } from 'jsonc-parser';
 import JSON5 from 'json5';
+import { quickSettingsPatches } from '../shared/tool-quick-settings.mjs';
 
 export class ToolConfigError extends Error { constructor(message, status = 400) { super(message); this.status = status; } }
 export const TOOL_IDS = ['claude', 'claude-desktop', 'codex', 'gemini', 'grok', 'opencode', 'openclaw', 'hermes', 'pi', 'mcode'];
@@ -67,6 +68,7 @@ export function nativePatches(profile, provider, current = {}) {
     case 'claude-desktop': { const profileId = '36da542a-1436-49c2-8426-66287831dc66', entries = current.meta?.entries || []; if (!Array.isArray(entries)) throw new ToolConfigError('Desktop entries 应为数组'); patches = { settings: { deploymentMode: '3p' }, config: { deploymentMode: '3p' }, profile: { inferenceGatewayApiKey: apiKey, inferenceGatewayAuthScheme: 'bearer', inferenceGatewayBaseUrl: baseURL, inferenceProvider: 'gateway', inferenceModels: [{ name: model }] }, meta: { entries: [...entries.filter(x => x.id !== profileId), mergeConfig(structuredClone(entries.find(x => x.id === profileId) || {}), { id: profileId, name: 'DSH-Plus' })], appliedId: profileId } }; break; }
   }
   for (const [role, patch] of Object.entries(profile.overrides || {})) { if (!patches[role]) throw new ToolConfigError('无效的配置文件角色'); mergeConfig(patches[role], patch); }
+  for (const [role, patch] of Object.entries(quickSettingsPatches(tool, profile.quickSettings))) mergeConfig(patches[role] ??= {}, patch);
   return patches;
 }
 export function parseConfig(raw, format) {
