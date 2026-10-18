@@ -27,8 +27,11 @@ jobs:
           node-version: '24'
       - name: Prepare package manager
         run: |
-          npm install --global corepack@0.34.0
+          # Hosted Windows images include Yarn shims; let Corepack replace them.
+          npm install --global --force corepack@0.34.0
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           corepack enable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           git config --global core.longpaths true
       - name: Install official locked dependencies
         run: npm run setup
