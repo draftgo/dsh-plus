@@ -22,7 +22,7 @@ import { mountBrand } from '../../link/client/brand.jsx';
 
 const names = { codex: 'Codex', claude: 'Claude Code', pi: 'Pi', opencode: 'OpenCode', gemini: 'Gemini CLI', hermes: 'Hermes', grok: 'Grok Build', mcode: 'MiniMax Code', deepseek: 'DeepSeek' };
 const liveStates = new Set(['running', 'connecting', 'waiting']);
-const states = { idle: '就绪', completed: '已完成', running: '运行中', connecting: '连接中', disconnected: '未连接', waiting: '等待回复或授权', failed: '失败', closed: '已关闭' };
+const states = { idle: '就绪', completed: '已完成 · 未读', running: '运行中', connecting: '连接中', disconnected: '未连接', waiting: '等待回复或授权', failed: '失败', closed: '已关闭' };
 const listeners = new Set();
 let defaultWorkspaceId;
 let data = { projects: [], sessions: [], selected: null, projectId: null, error: '', loaded: false };
@@ -175,7 +175,7 @@ function Projects({ host, open, newSession, expandSidebar, wide = true }) {
   const nativeFor = id => d.sessions.filter(s => s.ownerSessionId === id && (!s.parentId || s.harnessAdopted)).sort((a,b) => Number(b.updatedAt)-Number(a.updatedAt))[0];
   const matches = row => !filter || `${row.title} ${row.provider} ${row.model || ''}`.toLowerCase().includes(filter.toLowerCase());
   const rows = [
-    ...d.sessions.filter(s => (!harness.byId[s.ownerSessionId] || (s.parentId && !s.harnessAdopted)) && (s.title || ['running', 'waiting', 'connecting', 'failed'].includes(s.status)) && (showArchived ? s.archived : !s.archived)).map(s => ({ ...s, status: sidebarSessionStatus(undefined, undefined, s), native: true })),
+    ...d.sessions.filter(s => (!harness.byId[s.ownerSessionId] || (s.parentId && !s.harnessAdopted)) && (s.title || ['running', 'waiting', 'connecting', 'failed'].includes(s.status)) && (showArchived ? s.archived : !s.archived)).map(s => ({ ...s, status: sidebarSessionStatus(undefined, statuses.get(s.id), s), native: true })),
     ...workspaceProjects.flatMap(p => p.sessionIds.filter(id => harness.byId[id] && !harness.byId[id].blank && !(d.deletedHarnessIds ?? []).includes(id) && archivedIds.has(id) === showArchived).map(id => ({ id, archived: archivedIds.has(id), nativeId: nativeFor(id)?.id, projectId: p.id, title: harness.byId[id].displayTitle || harness.byId[id].title || '新对话', provider: nativeFor(id)?.provider ?? 'deepseek', model: nativeFor(id)?.model, status: sidebarSessionStatus(harness.byId[id], statuses.get(id), nativeFor(id)), updatedAt: harness.byId[id].updatedAt }))),
   ].filter(matches).sort((a, b) => Number(workspaces.pinnedSessionIds?.includes(b.id) ?? false) - Number(workspaces.pinnedSessionIds?.includes(a.id) ?? false)
     || (Number(b.updatedAt) || Date.parse(b.updatedAt) || 0) - (Number(a.updatedAt) || Date.parse(a.updatedAt) || 0));

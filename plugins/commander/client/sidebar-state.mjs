@@ -4,13 +4,14 @@ export const recentWorkspace=projects=>projects.find(isRecentWorkspace);
 export const projectWorkspaces=projects=>projects.filter(project=>!isRecentWorkspace(project));
 export function recentRows(rows,projects){const defaults=new Set(projects.filter(isRecentWorkspace).map(p=>p.id??p.workspaceId));return rows.filter(row=>defaults.has(row.projectId)||projects.some(p=>isRecentWorkspace(p)&&typeof p.path==='string'&&p.path.length>0&&p.path===row.cwd));}
 export function displayWorkspaceTitle(workspace){return isRecentWorkspace(workspace)?'最近':workspace.title;}
-/** List status follows current interaction/execution facts; a fresh native connection is not a completed turn. */
+/** Completion is an unread notification owned and acknowledged by the official main view. */
 export function sidebarSessionStatus(official,ui,native){
   if(ui?.pendingInteraction||native?.status==='waiting')return 'waiting';
   if((ui?.running??official?.running)||native?.status==='running')return 'running';
   if(native?.status==='connecting'||native?.status==='failed')return native.status;
-  if(native)return native.status==='idle'&&native.turnId?'completed':native.status;
-  return official?.blank===false&&(ui?.running??official?.running)===false?'completed':undefined;
+  if(ui?.completionUnread===true)return 'completed';
+  if(native)return native.status==='completed'?'idle':native.status;
+  return undefined;
 }
 /** Activity includes official sessions and their native delegates, even without a cwd. */
 export function workspaceActivity(project,liveSessions){

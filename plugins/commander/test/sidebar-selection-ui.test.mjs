@@ -29,7 +29,12 @@ function render(activeSessionId, options = {}) {
     uiSession: { sessionStatus: { getSnapshot: () => options.statuses ?? new Map() } },
   };
   const tree = module.exports.Projects({ host, open() {}, newSession: options.newSession ?? (() => {}) });
-  const walk = node => node && typeof node === 'object' ? [node, ...node.children.flatMap(walk)] : [];
+  const walk = node => {
+    if (!node || typeof node !== 'object') return [];
+    let resolved = node;
+    while (options.resolveIcons && ['SessionIcon', 'Activity', 'Icon'].includes(resolved?.type?.name)) resolved = resolved.type(resolved.props);
+    return resolved ? [resolved, ...resolved.children.flatMap(walk)] : [];
+  };
   return walk(tree);
 }
 
@@ -91,13 +96,35 @@ test('Recent shows activity for its default workspace', () => {
   assert.equal(label.children.find(node => typeof node === 'object')?.props.status, 'waiting');
 });
 
-test('session list exposes completed, running and waiting icons without keeping workspace activity lit after completion', () => {
-  const nodes=render(undefined,{statuses:new Map([['second',{running:true}],['third',{running:true,pendingInteraction:{kind:'question'}}]])});
+test('session list exposes unread completed, running and waiting icons without keeping workspace activity lit after completion', () => {
+  const nodes=render(undefined,{statuses:new Map([['first',{running:false,completionUnread:true}],['second',{running:true}],['third',{running:true,pendingInteraction:{kind:'question'}}]])});
   const rows=nodes.filter(node=>node.props.className?.split(' ').includes('cmd-session'));
   assert.deepEqual(rows.map(row=>row.children.find(child=>typeof child==='object')?.props.status),['completed','running','waiting']);
   const completed=render(undefined);
   assert.equal(completed.some(node=>node.props.className==='cmd-project-activity'),false);
   assert.equal(completed.find(node=>node.props.className==='cmd-section-label').children.filter(child=>typeof child==='object').length,0);
+});
+
+test('reading a completed session restores its original tool icon', () => {
+  const unread = render(undefined, { resolveIcons: true, statuses: new Map([['first', { running: false, completionUnread: true }]]) });
+  assert.equal(unread.filter(node => node.props.className?.includes('cmd-status-completed')).length, 1);
+  assert.equal(unread.filter(node => node.props.className === 'cmd-icon cmd-deepseek').length, 2);
+  // The official main view acknowledges completionUnread when the user opens the session.
+  const read = render('first', { resolveIcons: true, statuses: new Map([['first', { running: false, completionUnread: false }]]) });
+  assert.equal(read.filter(node => node.props.className?.includes('cmd-status-completed')).length, 0);
+  assert.equal(read.filter(node => node.props.className === 'cmd-icon cmd-deepseek').length, 3);
+  const restored = render(undefined, { resolveIcons: true });
+  assert.equal(restored.filter(node => node.props.className?.includes('cmd-status-completed')).length, 0, 'historical stopped sessions are not automatically unread');
+  assert.equal(restored.filter(node => node.props.className === 'cmd-icon cmd-deepseek').length, 3);
+});
+
+test('read coding agent sessions restore their provider icon too', () => {
+  const commander = { loaded: true, projects: [{ id: 'recent', isDefault: true, sessionIds: ['first'] }], sessions: [{ id: 'native-first', ownerSessionId: 'first', projectId: 'recent', provider: 'codex', status: 'idle', turnId: 'finished' }] };
+  const unread = render(undefined, { commander, resolveIcons: true, statuses: new Map([['first', { completionUnread: true }]]) });
+  assert.equal(unread.filter(node => node.props.className?.includes('cmd-status-completed')).length, 1);
+  const read = render('first', { commander, resolveIcons: true, statuses: new Map([['first', { completionUnread: false }]]) });
+  assert.equal(read.filter(node => node.props.className?.includes('cmd-status-completed')).length, 0);
+  assert.equal(read.filter(node => node.props.className === 'cmd-icon cmd-codex').length, 1);
 });
 
 test('archived and dismissed official sessions do not keep workspace activity visible', () => {

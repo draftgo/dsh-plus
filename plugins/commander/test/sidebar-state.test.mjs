@@ -2,17 +2,24 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {isRecentWorkspace,projectWorkspaces,recentRows,startSidebarSession,isSidebarSessionSelected,sidebarWorkspaces,ensureSidebarWorkspace,sidebarSessionStatus} from '../client/sidebar-state.mjs';
 const projects=[{id:'auto',isDefault:true,title:'default-workspace',path:'/home/user/Documents/deepseek-harness/default-workspace'},{id:'user',title:'default-workspace',path:'/projects/default-workspace'},{id:'named',title:'自己的项目',path:'/projects/named'}];
-test('session list resolves waiting, running and completed from official and native facts',()=>{
+test('session list uses official unread completion and preserves execution priorities',()=>{
  const official={blank:false,running:false};
- assert.equal(sidebarSessionStatus(official), 'completed');
+ assert.equal(sidebarSessionStatus(official), undefined);
+ assert.equal(sidebarSessionStatus(official,{completionUnread:true}), 'completed');
+ assert.equal(sidebarSessionStatus(official,{completionUnread:false}), undefined);
  assert.equal(sidebarSessionStatus({...official,running:true}), 'running');
  assert.equal(sidebarSessionStatus(official,{running:true,pendingInteraction:{kind:'question'}}), 'waiting');
  assert.equal(sidebarSessionStatus(official,undefined,{status:'waiting'}), 'waiting');
  assert.equal(sidebarSessionStatus(official,undefined,{status:'running'}), 'running');
- assert.equal(sidebarSessionStatus(official,undefined,{status:'idle',turnId:'turn'}), 'completed');
- assert.equal(sidebarSessionStatus(undefined,undefined,{status:'idle',turnId:'turn'}), 'completed');
+ assert.equal(sidebarSessionStatus(official,undefined,{status:'idle',turnId:'turn'}), 'idle');
+ assert.equal(sidebarSessionStatus(undefined,undefined,{status:'idle',turnId:'turn'}), 'idle');
+ assert.equal(sidebarSessionStatus(official,{completionUnread:true},{status:'idle',turnId:'turn'}), 'completed');
+ assert.equal(sidebarSessionStatus(official,{completionUnread:false},{status:'completed',turnId:'turn'}), 'idle');
+ assert.equal(sidebarSessionStatus(official,{running:true,completionUnread:true}), 'running');
+ assert.equal(sidebarSessionStatus(official,{completionUnread:true},{status:'waiting'}), 'waiting');
+ assert.equal(sidebarSessionStatus(official,{completionUnread:true},{status:'failed'}), 'failed');
  assert.equal(sidebarSessionStatus(official,{running:true},{status:'idle',turnId:'previous'}), 'running');
- assert.equal(sidebarSessionStatus({...official,running:true},{running:false}), 'completed');
+ assert.equal(sidebarSessionStatus({...official,running:true},{running:false}), undefined);
 });
 test('fresh, unknown, disconnected and failed sessions are never marked completed',()=>{
  for(const official of [undefined,{blank:true,running:false},{blank:false}])assert.equal(sidebarSessionStatus(official),undefined);
