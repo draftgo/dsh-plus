@@ -5,6 +5,11 @@ import { Context } from '@deepseek-ai/cordis';
 import LlmRuntime from '@deepseek-ai/dsh-llm';
 import { mountHarnessAdapter } from '../src/harness-adapter.mjs';
 import { encodeRouteModelId } from '../src/picker-catalog.mjs';
+import { createSessionRoutes } from '../src/session-routes.mjs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 
 class Native extends EventEmitter {
   providers = new Map([['codex', { config: {} }]]);
@@ -78,6 +83,42 @@ test('same tool and supplier can change models on its existing idle native conve
   assert.equal(s.native.records[0].model, 'vendor/two');
   assert.equal(s.native.records[0].route.model, 'vendor/two');
   await assert.rejects(collect(s.adapter.stream({ ...request([human('three', 'other supplier')]), model: encodeRouteModelId('router/b', 'vendor/three') })), /新建聊天/);
+  await s.dispose();
+});
+test('changing models retains a complete reconnectable binding and captured native effort', async t => {
+  const s = setup(), directory = await mkdtemp(join(tmpdir(), 'adapter-route-switch-'));
+  t.after(async () => { await s.dispose(); await rm(directory, { recursive: true, force: true }); });
+  const provider = { baseURL: 'https://router.example/v1', apiKey: 'test-secret', credentialRef: 'router-key', protocol: 'openai-responses' };
+  const routes = createSessionRoutes({ directory, providers: { resolve: async () => provider, describeRoute: async () => provider } });
+  s.native.routeService = routes;
+  const create = s.native.create.bind(s.native);
+  s.native.create = async options => create({ ...options, route: await routes.capture({ tool: options.provider, ...options.route, quickSettings: { effort: 'high', multiAgent: true } }) });
+  const first = encodeRouteModelId('router', 'vendor/one'), second = encodeRouteModelId('router', 'vendor/two');
+  s.native.pickerCatalog = { models: async () => [first, second].map(id => ({ id, provider: 'commander-codex', name: id, inputModalities: ['text'] })) };
+  await collect(s.adapter.stream({ ...request([human('one', 'hello')]), model: first }));
+  const before = structuredClone(s.native.records[0].route);
+  await collect(s.adapter.stream({ ...request([human('two', 'change')]), model: second }));
+  const after = s.native.records[0].route;
+  assert.equal(after.model, 'vendor/two');
+  assert.equal(after.version, 1);
+  assert.equal(after.mode, before.mode);
+  assert.equal(after.baseURL, before.baseURL);
+  assert.equal(after.credentialRef, before.credentialRef);
+  assert.deepEqual(after.quickSettings, before.quickSettings);
+  assert.notEqual(after.fingerprint, before.fingerprint);
+  const launch = await routes.launch({ tool: 'codex', route: JSON.parse(JSON.stringify(after)), sessionId: randomUUID() });
+  assert(launch.commandArgs.includes('model="vendor/two"'));
+  assert(launch.commandArgs.includes('model_reasoning_effort="high"'));
+  provider.baseURL = 'https://changed.example/v1';
+  await assert.rejects(collect(s.adapter.stream({ ...request([human('three', 'change back')]), model: first })), /已更改/);
+  assert.equal(s.native.records[0].model, 'vendor/two');
+  assert.deepEqual(s.native.records[0].route, after);
+});
+test('native adapters reject API effort IDs instead of silently ignoring a saved selection', async () => {
+  const s = setup();
+  await assert.rejects(collect(s.adapter.stream({ ...request([human('one', 'hello')]), reasoningEffort: 'high' })), /设置 → Harness/);
+  assert.equal(s.native.records.length, 0);
+  assert.equal(s.native.sent.length, 0);
   await s.dispose();
 });
 test('managed picker refuses unsafe new defaults while preserving legacy native sessions', async () => {

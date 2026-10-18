@@ -45,7 +45,8 @@ test('catalog gates installed tools by explicit binding and safe route support w
   assert.equal(result.tools.find(tool => tool.id === 'hermes').routeSupported, false);
   assert.equal(models.length, 1); assert.equal(models[0].name, 'Model');
   assert.deepEqual(decodeRouteModelId(models[0].id), { providerId: 'router/go', model: 'vendor/model' });
-  assert.equal(models[0].reasoning.defaultEffort, 'high');
+  assert.equal(models[0].reasoning, undefined);
+  assert.equal(result.routes.find(row => row.tool === 'deepseek').reasoning.defaultEffort, 'high');
   assert.equal(models[0].context.contextWindow, 128000);
   assert.equal(probes, 1); assert.equal(resolutions, 0);
   assert.doesNotMatch(JSON.stringify([result, models]), /apiKey|do-not-expose/);
@@ -85,15 +86,25 @@ test('shared catalog callers receive isolated nested result objects', async () =
   first.tools[0].name = 'Changed';
   first.providers[0].tools.length = 0;
   first.routes[0].context.contextWindow = 1;
-  first.routes[0].reasoning.efforts[0].name = 'Changed';
   models[0].context.contextWindow = 2;
-  models[0].reasoning.efforts[0].name = 'Changed';
   assert.equal(second.tools[0].name, 'DeepSeek');
   assert.deepEqual(second.providers[0].tools, ['codex', 'claude']);
   assert.equal(second.routes[0].context.contextWindow, 128000);
-  assert.equal(second.routes[0].reasoning.efforts[0].name, 'High');
+  assert.equal(second.routes[0].reasoning, undefined);
   assert.equal(otherModels[0].context.contextWindow, 128000);
-  assert.equal(otherModels[0].reasoning.efforts[0].name, 'High');
+  assert.equal(otherModels[0].reasoning, undefined);
+});
+test('API reasoning metadata stays on its API route and does not imply native CLI support', async () => {
+  const reasoning = { efforts: [{ id: 'provider-custom', name: 'Custom' }], defaultEffort: 'provider-custom' };
+  const { service, state } = catalogFixture({ llm: { listModels: async () => [{ id: 'vendor/exact-id', name: 'Exact', reasoning }] } });
+  state.bindings.shared = ['harness', 'codex', 'claude'];
+  const catalog = await service.list();
+  assert.deepEqual(catalog.routes.find(row => row.tool === 'deepseek').reasoning, reasoning);
+  for (const route of catalog.routes.filter(row => row.tool !== 'deepseek')) {
+    assert.equal(route.reasoning, undefined);
+    assert.equal(route.nativeModelId, 'vendor/exact-id');
+  }
+  assert((await service.models('codex')).every(model => model.reasoning === undefined));
 });
 test('completed reads do not cache stale bindings or model directories', async () => {
   const { service, calls, state, rows } = catalogFixture();

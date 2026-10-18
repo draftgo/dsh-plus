@@ -14,7 +14,7 @@ test('standard and unfamiliar models use only OpenAI speech fields regardless of
 test('known Step models and the 2.5 alias preserve legacy streaming extensions', () => {
   for (const model of ['stepaudio-2.5-tts', 'stepfun-2.5-tts', 'stepaudio-3-tts', 'step-tts-2', 'step-tts-mini']) {
     const body = speechRequest({ model }, '测试');
-    assert.deepEqual(body, { model: model === 'stepfun-2.5-tts' ? 'stepaudio-2.5-tts' : model, voice: 'cixingnansheng', input: '测试', response_format: 'pcm', speed: 1.2, sample_rate: 24000, stream: true });
+    assert.deepEqual(body, { model, voice: 'cixingnansheng', input: '测试', response_format: 'pcm', speed: 1.2, sample_rate: 24000, stream: true });
   }
 });
 

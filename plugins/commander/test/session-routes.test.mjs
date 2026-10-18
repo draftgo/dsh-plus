@@ -150,6 +150,28 @@ test('explicit model routes inherit tool quick settings once without changing th
   assert.equal(runtime.snapshot(session.id).route.quickSettings.effort, 'high');
 });
 
+test('an explicitly selected model survives default profile capture and reload unchanged', async t => {
+  const { directory, routes } = await fixture(t), state = join(directory, 'explicit-model');
+  let runtime = await new Commander({ dataDir: state, routeService: routes }).open();
+  t.after(async () => { await runtime.close(); await rm(directory, { recursive: true, force: true }); });
+  const launches = [], provider = { config: {}, async connect(session) { launches.push({ model: session.model, args: this.config.commandArgs }); return { nativeId: session.id, close: async () => {} }; } };
+  runtime.providers.set('codex', provider);
+  runtime.toolProfiles = { list: async () => ({ defaults: [{ tool: 'codex', providerId: 'a', model: 'default-alias', quickSettings: { effort: 'high' } }] }) };
+  const session = await runtime.create({ provider: 'codex', model: 'vendor/explicit-model' });
+  assert.equal(session.model, 'vendor/explicit-model');
+  assert.equal(session.route.model, 'vendor/explicit-model');
+  assert.equal(session.route.providerId, 'a');
+  assert(launches[0].args.includes('model="vendor/explicit-model"'));
+  assert(launches[0].args.includes('model_reasoning_effort="high"'));
+  await runtime.close();
+  runtime = await new Commander({ dataDir: state, routeService: routes }).open();
+  runtime.providers.set('codex', provider);
+  runtime.toolProfiles = { list() { throw Error('reconnect must not read mutable defaults'); } };
+  await runtime.connect(session.id);
+  assert.equal(launches.at(-1).model, 'vendor/explicit-model');
+  assert(launches.at(-1).args.includes('model="vendor/explicit-model"'));
+});
+
 test('subscription routes retain native login homes, reject cross-tool use and never resolve API secrets', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'subscription-routes-')); t.after(() => rm(directory, { recursive: true, force: true }));
   const access = { id: 'subscription', authMode: 'subscription', configured: true, harnessTools: ['codex'] };

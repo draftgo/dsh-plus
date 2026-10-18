@@ -59,6 +59,7 @@ export function mountHarnessAdapter(ctx, commander, { bindOwner, cwd, discover =
     async *stream(options) {
       if (disposed) throw new Error('DSH-Plus adapter is disposed');
       if (options.purpose) throw new Error(`DSH-Plus native agents do not support auxiliary ${options.purpose} requests`);
+      if (options.reasoningEffort !== undefined) throw new Error('此工具不支持 API 模型的思考档位，请在设置 → Harness 中配置对应工具的推理强度后新建对话');
       options.signal?.throwIfAborted();
       const agent = ctx.agents.requireInitiator();
       const owner = String(agent.session.id);
@@ -109,10 +110,17 @@ export function mountHarnessAdapter(ctx, commander, { bindOwner, cwd, discover =
           }
           const driver = commander.drivers.get(existing.id);
           if (driver && !driver.setModel) throw new Error(`${native} 当前连接不支持在同一会话中切换模型，请新建聊天`);
+          // Decoding a picker ID recovers identity only. Re-capture the full
+          // binding so reconnects retain validation and this session's settings.
+          const nextRoute = commander.routeService?.capture
+            ? await commander.routeService.capture({ tool: native, ...binding, ...(existing.route?.quickSettings ? { quickSettings: existing.route.quickSettings } : {}) })
+            : binding;
+          if (existing.route?.version && !nextRoute.version) throw new Error('会话绑定服务不可用，无法保存模型变更');
+          if (existing.route?.version && ['mode', 'baseURL', 'protocol', 'sourceProtocol', 'credentialRef'].some(key => existing.route[key] !== nextRoute[key])) throw new Error('绑定供应商的地址、协议或凭据引用已更改，请新建会话或恢复原配置。');
           await driver?.setModel(nativeModel);
           const record = commander.get(existing.id);
           record.model = nativeModel;
-          record.route = binding;
+          record.route = nextRoute;
           await commander.persist();
           commander.event(existing.id, 'model.changed', { providerId: binding.providerId, model: binding.model, nativeModel });
         }

@@ -56,7 +56,9 @@ export function createPickerCatalog({ commander, installer, profiles, providers,
     await Promise.all(providerRows.map(async provider => {
       if (!provider.tools.length || provider.authMode === 'subscription' && (!provider.configured || !llm?.listModels)) return;
       let rows; try { rows = await providerModels(provider.id); } catch { return; }
-      for (const tool of provider.tools) for (const model of rows) routes.push({ tool, providerId: provider.id, providerName: provider.name, modelId: tool === 'deepseek' ? model.id : encodeRouteModelId(provider.id, model.id), nativeModelId: model.id, name: model.name, ...(provider.authMode === 'subscription' ? { authMode: 'subscription' } : {}), ...(model.context ? { context: model.context } : {}), ...(model.reasoning ? { reasoning: model.reasoning } : {}) });
+      // API adapter effort IDs (including custom wire mappings) are not native
+      // CLI capabilities. Native effort stays in the tool's saved quick settings.
+      for (const tool of provider.tools) for (const model of rows) routes.push({ tool, providerId: provider.id, providerName: provider.name, modelId: tool === 'deepseek' ? model.id : encodeRouteModelId(provider.id, model.id), nativeModelId: model.id, name: model.name, ...(provider.authMode === 'subscription' ? { authMode: 'subscription' } : {}), ...(model.context ? { context: model.context } : {}), ...(tool === 'deepseek' && model.reasoning ? { reasoning: model.reasoning } : {}) });
     }));
     routes.sort((a, b) => a.tool.localeCompare(b.tool) || a.providerId.localeCompare(b.providerId) || a.nativeModelId.localeCompare(b.nativeModelId));
     return { tools, providers: providerRows, routes };

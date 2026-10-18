@@ -8,7 +8,7 @@ const require = createRequire(new URL('../../package.json', import.meta.url));
 const { transformSync } = require('esbuild');
 const source = readFileSync(new URL('../client/index.jsx', import.meta.url), 'utf8');
 const css = readFileSync(new URL('../client/style.css', import.meta.url), 'utf8');
-const code = transformSync(source, { loader: 'jsx', format: 'cjs' }).code;
+const code = transformSync(source + '\nexport { ProviderSettings };', { loader: 'jsx', format: 'cjs' }).code;
 function mount(overrides = {}) {
   const state = { config: { dictation: true, readAloud: true, call: true, asr: { configured: true, model: 'asr' }, tts: { configured: true, model: 'tts' } }, sessionId: 'session', mode: 'call', phase: 'listening', muted: false, level: .3, readEnabled: true, ...overrides };
   const effects = [], actions = [], registrations = [], refs = [];
@@ -54,6 +54,31 @@ test('TTS speed defaults to 1.2, stays in the supported range, and is round-trip
   assert.equal(h.exports.normalizeTtsSpeed(4.5), 1.2);
   assert.equal(h.exports.draftFrom({ tts: { model: 'speaker', speed: 1.65 } }).tts.speed, 1.65);
   assert.equal(h.exports.draftFrom({ tts: { model: 'speaker' } }).tts.speed, 1.2);
+});
+test('reselecting a voice provider preserves choices; switching providers resets borrowed settings', () => {
+  const h = mount();
+  for (const name of ['asr', 'tts']) {
+    const updates = [];
+    const tree = h.exports.ProviderSettings({ name, draft: { providerId: 'current', model: 'chosen', protocol: name === 'asr' ? 'step-websocket' : 'step-speech' }, providers: [{ id: 'current' }, { id: 'next', baseURL: 'https://next.test/v1' }], update: value => updates.push(value) });
+    const select = nodes(tree).find(node => node.props.label === '模型供应商');
+    select.props.onChange('current');
+    assert.equal(updates.length, 0);
+    select.props.onChange('next');
+    assert.equal(updates[0].providerId, 'next');
+    assert.equal(updates[0].model, '');
+    assert.equal(updates[0].apiKey, '');
+    assert.equal(updates[0].protocol, name === 'asr' ? 'transcriptions-sse' : 'speech');
+  }
+});
+test('editing a realtime URL preserves saved routing query and model placeholders', () => {
+  const h = mount(), updates = [];
+  const realtime = { url: 'wss://old.test/realtime', query: { model: '{model}', exit_id: 'chosen.route' } };
+  const tree = h.exports.ProviderSettings({ name: 'asr', draft: { providerId: '', model: 'step-asr', protocol: 'step-websocket', realtime }, providers: [], update: value => updates.push(value) });
+  const input = nodes(tree).find(node => node.type === 'input' && node.props.value === realtime.url);
+  input.props.onChange({ target: { value: 'wss://new.test/realtime' } });
+  assert.equal(updates[0].realtime.url, 'wss://new.test/realtime');
+  assert.deepEqual(updates[0].realtime.query, realtime.query);
+  assert.equal(realtime.url, 'wss://old.test/realtime');
 });
 test('call takeover restores editor inert flags and card class after cleanup', () => {
   const h = mount(); const tree = h.render();

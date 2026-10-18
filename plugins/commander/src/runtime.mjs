@@ -123,7 +123,7 @@ export class Commander extends EventEmitter {
     if (!nativeMode && !nativeId && this.routeService && this.toolProfiles?.list) {
       const defaults = (await this.toolProfiles.list({ includeNative: false })).defaults;
       const selected = Array.isArray(defaults) ? defaults.find(item => item.tool === provider) : defaults?.[provider];
-      if (!route && selected) route = selected;
+      if (!route && selected) route = { ...selected, ...(model !== undefined ? { model } : {}) };
       else if (route && route.quickSettings === undefined && selected?.quickSettings) route = { ...route, quickSettings: selected.quickSettings };
     }
     if (route && !this.routeService) throw new Error('会话绑定服务不可用');

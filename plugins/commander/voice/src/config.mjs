@@ -47,20 +47,16 @@ export function validateRealtime(value, apiKey = '') {
   }
   return result;
 }
-// StepFun's public ID is stepaudio-2.5-tts. Accept the commonly mistyped
-// stepfun-2.5-tts alias at the boundary so old/local settings keep working.
+// Model IDs belong to the selected provider; an apparent alias may be a distinct route.
 export function normalizeTtsModel(model) {
-  const value = String(model || '').trim();
-  return /^stepfun-2\.5-tts$/iu.test(value) ? 'stepaudio-2.5-tts' : value;
+  return String(model || '').trim();
 }
-// Preserve shorthand compatibility at the model boundary, independent of providers.
 export function normalizeAsrModel(model) {
-  const value = String(model || '').trim();
-  return /^(?:step-asr|stepfun-2\.5-asr)$/iu.test(value) ? 'stepaudio-2.5-asr' : value;
+  return String(model || '').trim();
 }
 export function isStepTtsModel(model) {
   const value = normalizeTtsModel(model).toLowerCase();
-  return /^(?:stepaudio-(?:2\.5|3)-tts|step-tts-(?:2|mini))$/u.test(value);
+  return /^(?:stepaudio-(?:2\.5|3)-tts|stepfun-2\.5-tts|step-tts-(?:2|mini))$/u.test(value);
 }
 export function normalizeTtsSpeed(value) {
   if (value === undefined) return DEFAULT_TTS_SPEED;
@@ -108,6 +104,7 @@ export function migrateLegacyConfig(value) {
     const model = String(next.asr.model || '').toLowerCase();
     next.asr.protocol = /^stepaudio-.*-asr-stream$/u.test(model) ? 'step-websocket' : /^(?:mimo|stepaudio)-.*-asr(?:-max)?$/u.test(model) ? 'transcriptions-sse' : 'transcriptions';
   }
+  if (next.tts && !Object.hasOwn(next.tts, 'protocol')) next.tts.protocol = isStepTtsModel(next.tts.model) ? 'step-speech' : 'speech';
   return next;
 }
 export function publicConfig(config) {

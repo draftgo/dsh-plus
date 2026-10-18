@@ -5,7 +5,7 @@ import { createElectronBuilderConfig } from '../../deepseek-harness/apps/desktop
 import { prepareDesktopBrand } from './prepare-brand.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
-const version = JSON.parse(readFileSync(new URL('../../plugins/commander/package.json', import.meta.url))).version;
+const version = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url))).version;
 // The official factory requires policy metadata. Updates use the application's own feed.
 const config = createElectronBuilderConfig({
   ...process.env, DSH_DESKTOP_APP_ID: 'cn.draftgo.dshplus', DSH_DESKTOP_UNSIGNED: '1',

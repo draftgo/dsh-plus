@@ -43,7 +43,7 @@ jobs:
         shell: bash
         run: |
           test -f plugins/link/mobile/android/app/build/outputs/apk/debug/app-debug.apk
-          version=$(node -p "JSON.parse(require('fs').readFileSync('plugins/commander/package.json','utf8')).version")
+          version=$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).version")
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging plugins/link/mobile/android/app/build/outputs/apk/debug/app-debug.apk | grep "versionName='$version'"
           cp plugins/link/mobile/android/app/build/outputs/apk/debug/app-debug.apk "dsh-plus-${version}-android-debug.apk"
       - uses: actions/upload-artifact@v4
@@ -61,7 +61,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version=$(node -p "JSON.parse(require('fs').readFileSync('plugins/commander/package.json','utf8')).version")
+          version=$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).version")
           test "$RELEASE_TAG" = "v${version}"
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "DSH-Plus ${version}" --notes "DSH-Plus application release with Xiaojiao branding and independent plugin updates. Android APK is a debug build for device testing." --latest=false

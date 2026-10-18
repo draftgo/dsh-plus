@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, stat, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, stat, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { VoiceConfig, updateConfig, publicConfig, migrateLegacyConfig, normalizeTtsModel, normalizeAsrModel } from '../src/config.mjs';
@@ -70,6 +70,33 @@ test('fresh voice configuration defaults to the verified Step multipart SSE rout
     assert.equal(store.value.asr.model, 'stepaudio-2.5-asr');
     assert.equal(store.value.asr.protocol, 'transcriptions-sse');
     assert.equal(store.value.tts.model, 'stepaudio-2.5-tts');
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('provider ASR IDs survive saving, reopening and multipart requests unchanged', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'voice-provider-model-'));
+  try {
+    for (const model of ['step-asr', 'stepfun-2.5-asr']) for (const protocol of ['transcriptions', 'transcriptions-sse']) {
+      const store = await new VoiceConfig({ dataDir: directory }).open();
+      const saved = await store.configure({ dictation: true, asr: { providerId: 'routergo', model, protocol } });
+      assert.equal(saved.asr.model, model);
+      assert.equal(JSON.parse(await readFile(store.path, 'utf8')).asr.model, model);
+      const reopened = await new VoiceConfig({ dataDir: directory }).open();
+      assert.equal(reopened.snapshot().asr.model, model);
+      const handlers = createVoiceHandlers(reopened, {
+        providers: { resolve: async () => ({ baseURL: 'https://routergo.test/api/v1' }) },
+        fetcher: async (url, options) => {
+          assert.equal(url, 'https://routergo.test/api/v1/audio/transcriptions');
+          assert.equal(options.body.get('model'), model);
+          return protocol === 'transcriptions' ? Response.json({ text: 'recognized' }) : new Response('data: {"type":"transcript.text.done","text":"recognized"}\n\n', { headers: { 'content-type': 'text/event-stream' } });
+        },
+      });
+      try {
+        const response = await handlers.transcribe(input(wav()));
+        assert.equal(response.status, 200);
+        assert.match(await response.text(), /recognized/u);
+      } finally { handlers.dispose(); }
+    }
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
@@ -199,6 +226,27 @@ test('Step native realtime routes enforce owner boundary, forward PCM, stream re
   await h.config(json('/api/voice',{action:'configure',config:{dictation:false}}));assert.equal(socket.closed,true);assert.equal((await reader.read()).done,true);
   assert.equal((await h.config(json('/api/voice',{action:'asr.commit',id,utteranceId:1}))).status,409);h.dispose();
 });
+test('voice calls preserve the selected provider ASR ID in realtime routing and session settings', async () => {
+  const { EventEmitter } = await import('node:events'); let socket, connectedUrl;
+  class FakeSocket extends EventEmitter {
+    constructor() { super(); this.sent = []; queueMicrotask(() => this.emit('open')); }
+    send(raw) { const event = JSON.parse(raw); this.sent.push(event); if (event.type === 'session.update') queueMicrotask(() => this.emit('message', JSON.stringify({ type: 'session.updated' }))); }
+    close() { this.closed = true; }
+  }
+  const store = memory();
+  await store.configure({ dictation: false, asr: { providerId: 'routergo', model: 'step-asr', protocol: 'step-websocket', realtime: { url: 'wss://routergo.test/api/v1/realtime', query: { model: '{model}' } } } });
+  const h = createVoiceHandlers(store, { providers: { resolve: async () => ({ baseURL: 'https://routergo.test/api/v1' }) }, socket: url => { connectedUrl = url; return socket = new FakeSocket(); } });
+  try {
+    const started = await h.config(json('/api/voice', { action: 'call.start', sessionId: 'session', deviceId: 'device' }));
+    assert.equal(started.status, 200);
+    const { call } = await started.json();
+    const asr = await h.config(json('/api/voice', { action: 'asr.start' }, { headers: { 'content-type': 'application/json', 'x-voice-call-id': call.callId } }));
+    assert.equal(asr.status, 200);
+    assert.equal(new URL(connectedUrl).searchParams.get('model'), 'step-asr');
+    assert.equal(socket.sent[0].session.audio.input.transcription.model, 'step-asr');
+  } finally { h.dispose(); }
+});
+
 test('SSE transcription route emits partials and final; Step TTS chooses actual supported default',async()=>{
   const store=memory();store.value.asr.protocol='step-sse';store.value.tts.model='stepaudio-2.5-tts';store.value.tts.voice='';
   const h=createVoiceHandlers(store,{fetcher:async(url,options)=>{
@@ -209,15 +257,16 @@ test('SSE transcription route emits partials and final; Step TTS chooses actual 
   assert.equal((await (await h.speech(json('/api/voice/speech',{text:'测试'}))).arrayBuffer()).byteLength,4);h.dispose();
 });
 
-test('StepFun 2.5 TTS alias is normalized to the public stepaudio model ID', async () => {
-  assert.equal(normalizeTtsModel('stepfun-2.5-tts'), 'stepaudio-2.5-tts');
-  assert.equal(normalizeAsrModel('step-asr'), 'stepaudio-2.5-asr');
-  assert.equal(updateConfig(memory().value, { asr: { model: 'step-asr' }, tts: { model: 'stepfun-2.5-tts' } }).asr.model, 'stepaudio-2.5-asr');
+test('TTS keeps provider model IDs while retaining legacy Step protocol defaults', async () => {
+  assert.equal(normalizeTtsModel(' stepfun-2.5-tts '), 'stepfun-2.5-tts');
+  assert.equal(normalizeAsrModel(' step-asr '), 'step-asr');
+  assert.equal(updateConfig(memory().value, { tts: { model: 'stepfun-2.5-tts' } }).tts.model, 'stepfun-2.5-tts');
+  assert.equal(migrateLegacyConfig({ tts: { model: 'stepfun-2.5-tts' } }).tts.model, 'stepfun-2.5-tts');
   let sent;
   const store = memory(); store.value.tts.model = 'stepfun-2.5-tts'; store.value.tts.voice = '';
   const h = createVoiceHandlers(store, { fetcher: async (_url, options) => { sent = JSON.parse(options.body); return new Response(new Uint8Array([1, 0]), { headers: { 'content-type': 'audio/pcm' } }); } });
   await (await h.speech(json('/api/voice/speech', { text: '测试' }))).arrayBuffer();
-  assert.equal(sent.model, 'stepaudio-2.5-tts'); assert.equal(sent.voice, 'cixingnansheng'); assert.equal(sent.speed, 1.2); h.dispose();
+  assert.equal(sent.model, 'stepfun-2.5-tts'); assert.equal(sent.voice, 'cixingnansheng'); assert.equal(sent.speed, 1.2); h.dispose();
 });
 test('model selection preserves explicit protocols without guessing transport from the model name', () => {
   const base = memory().value; base.asr.protocol = 'transcriptions-sse';
@@ -235,9 +284,26 @@ test('pre-protocol model migration is provider independent and preserves explici
   assert.equal(migrateLegacyConfig({ asr: { model: 'stepaudio-2.5-asr-stream' } }).asr.protocol, 'step-websocket');
   const directory = await mkdtemp(join(tmpdir(), 'voice-migrate-'));
   try {
-    const { writeFile } = await import('node:fs/promises'); await writeFile(join(directory, 'config.json'), JSON.stringify(legacy));
+    await writeFile(join(directory, 'config.json'), JSON.stringify(legacy));
     const store = await new VoiceConfig({ dataDir: directory }).open(); assert.equal(store.value.asr.protocol, 'transcriptions-sse');
     await store.configure({ call: true }); assert.equal(JSON.parse(await readFile(store.path, 'utf8')).asr.protocol, 'transcriptions-sse');
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+test('legacy TTS reload keeps its effective protocol and preserves explicit protocol choices', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'voice-tts-migrate-'));
+  try {
+    for (const model of ['stepaudio-2.5-tts', 'stepfun-2.5-tts', 'custom-tts']) for (const explicit of [undefined, 'speech', 'step-speech']) {
+      const legacy = { tts: { baseURL: 'https://tts.test/v1', model, ...(explicit ? { protocol: explicit } : {}) } };
+      await writeFile(join(directory, 'config.json'), JSON.stringify(legacy));
+      const expected = explicit || (model === 'custom-tts' ? 'speech' : 'step-speech');
+      const store = await new VoiceConfig({ dataDir: directory }).open();
+      assert.equal(store.snapshot().tts.protocol, expected);
+      assert.equal(store.snapshot().tts.model, model);
+      await store.configure({ readAloud: true });
+      const reopened = await new VoiceConfig({ dataDir: directory }).open();
+      assert.equal(reopened.snapshot().tts.protocol, expected);
+      assert.equal(reopened.snapshot().tts.model, model);
+    }
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 test('safe upstream machine codes explain wrong protocol without reflecting provider message', async () => {
