@@ -36,6 +36,7 @@ test('legacy shortcut cleanup is limited to the original registered brand after 
   const source = await readFile(new URL('./package-windows.mjs', import.meta.url), 'utf8');
   const literal = source.match(/const bootstrap = ([\s\S]+?);\nawait mkdir/)[1];
   const overlay = runInNewContext(literal);
+  assert.match(overlay, /!ifndef BUILD_UNINSTALLER\nVar dshPreviousInstallLocation\nVar dshPreviousShortcutName\n!endif/);
   assert.match(overlay, /ReadRegStr \$dshPreviousInstallLocation HKCU "\$\{INSTALL_REGISTRY_KEY\}" "InstallLocation"/);
   assert.match(overlay, /ReadRegStr \$dshPreviousShortcutName HKCU "\$\{INSTALL_REGISTRY_KEY\}" "ShortcutName"/);
   assert.ok(overlay.indexOf('ReadRegStr $dshPreviousShortcutName') < overlay.indexOf('!insertmacro dshOfficialCustomInit'));

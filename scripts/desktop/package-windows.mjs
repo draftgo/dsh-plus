@@ -41,8 +41,10 @@ const include = (await readFile(join(desktop, 'scripts/installer.nsh'), 'utf8'))
 if (include.split('!macro customInstall\n').length !== 2) throw new Error('Official installer changed: customInstall hook must be reviewed');
 if (include.split('!macro customInit\n').length !== 2) throw new Error('Official installer changed: customInit hook must be reviewed');
 const bootstrap = `
+!ifndef BUILD_UNINSTALLER
 Var dshPreviousInstallLocation
 Var dshPreviousShortcutName
+!endif
 
 !macro customInit
   ReadRegStr $dshPreviousInstallLocation HKCU "\${INSTALL_REGISTRY_KEY}" "InstallLocation"
