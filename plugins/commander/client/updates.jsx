@@ -1,3 +1,4 @@
+import { readJsonResponse } from './http-response.mjs';
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { LinkIconMedium, Modal, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives';
 import { UIIcon } from './iconsax.jsx';
@@ -32,8 +33,7 @@ export function UpdateLauncher({ host, wide = true }) {
         method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ action, ...args }), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)]),
       });
-      const value = await response.json();
-      if (!response.ok) throw Error(value.error || `更新请求失败（${response.status}）`);
+      const value = await readJsonResponse(response, new URL('api/commander/updates', document.baseURI));
       if (mounted.current && !controller.signal.aborted) {
         setData(value);
         if (value.config) { setSource(value.config.source); setMirrorUrl(value.config.mirrorUrl || ''); }

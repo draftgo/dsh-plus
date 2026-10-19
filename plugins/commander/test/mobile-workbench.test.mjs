@@ -124,3 +124,17 @@ test('frame resize holds transitions until width settles and cleans up', () => {
   assert.equal(disconnected, true);
   dom.window.close();
 });
+
+// The settings portal is outside the workbench frame: its overlay must own
+// safe-area spacing, while the panel and close button stay inside that space.
+test('mobile settings portal reserves all system edges inside the visual viewport', () => {
+  const overlay = css.match(/\.cmd-settings-overlay\s*\{([^}]+)\}/)?.[1];
+  assert(overlay);
+  assert.match(overlay, /height: var\(--cmd-mobile-viewport-height, 100dvh\)/);
+  assert.match(overlay, /box-sizing: border-box/);
+  for (const edge of ['top', 'right', 'bottom', 'left']) assert(overlay.includes('env(safe-area-inset-' + edge + ', 0px)'));
+  const panel = css.match(/\[data-shortcut-modal="settings"\]\[role="dialog"\]\s*\{([^}]+)\}/)?.[1];
+  assert.match(panel, /height: 100%; max-height: 100%; min-height: 0/);
+  assert.doesNotMatch(panel, /100dvh|100vw/);
+  assert.match(css, /:not\(\[data-shortcut-modal="settings"\]\)/);
+});

@@ -1,3 +1,4 @@
+import { readJsonResponse } from '../client/http-response.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -44,6 +45,7 @@ function mount(component, initialProps, options = {}) {
   const module = { exports: {} };
   const code = transformSync(source + '\nexport { Select, ToolTabs };', { loader: 'jsx', format: 'cjs' }).code;
   runInNewContext(code, { ...globals, module, exports: module.exports, URL, AbortController, fetch: options.fetch || globalThis.fetch, setTimeout, clearTimeout, require(id) {
+    if (id === './http-response.mjs') return { readJsonResponse };
     if (id === 'react') return React;
     if (id === '@deepseek-ai/dsh-client-ui-primitives') return { ...upstream(primitives), Modal: ({ open, children, footer }) => open ? React.createElement('div', { role: 'dialog' }, children, footer) : null, Tooltip: ({ children }) => children };
     if (id === './tool-settings-state.mjs') return state;
@@ -164,7 +166,7 @@ for (const action of ['install', 'update', 'reinstall']) for (const source of ['
   const fetch = async (_url, options) => {
     const input = JSON.parse(options.body); calls.push(input);
     const body = input.action === 'catalog' ? catalog : input.action === 'providers' ? { providers: [] } : { job: { id: 'job', toolId: 'codex', action, source: input.source, status: 'running', message: '正在准备 Node.js 环境' } };
-    return { ok: true, json: async () => body };
+    return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
   };
   const view = mount('ToolSettingsSection', {}, { fetch });
   try {
@@ -199,7 +201,7 @@ test('running installation restores its selected source and non-npm tools omit t
     const fetch = async (_url, options) => {
       const { action } = JSON.parse(options.body);
       const body = action === 'providers' ? { providers: [] } : { tools: [{ id: 'codex', name: 'Codex', installer, canInstall: true, job: { id: 'running', toolId: 'codex', source: 'official', status: 'running', message: '安装中' } }], profiles: [] };
-      return { ok: true, json: async () => body };
+      return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
     };
     const view = mount('ToolSettingsSection', {}, { fetch });
     try {

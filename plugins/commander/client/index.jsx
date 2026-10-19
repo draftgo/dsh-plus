@@ -1,6 +1,7 @@
+import { readJsonResponse } from './http-response.mjs';
 import { mountLinkSettings } from '../../link/client/app.jsx';
 import { mountShellUi } from './shell-ui.jsx';
-import { projectWorkspaces, recentRows, startSidebarSession, isSidebarSessionSelected, sidebarWorkspaces, ensureSidebarWorkspace, workspaceActivity, sidebarSessionStatus } from './sidebar-state.mjs';
+import { projectWorkspaces, recentRows, startSidebarSession, isSidebarSessionSelected, sidebarWorkspaces, ensureSidebarWorkspace, workspaceActivity, sidebarSessionStatus, sidebarCapabilityWarning } from './sidebar-state.mjs';
 import { apply as applyVoice } from '../voice/client/index.jsx';
 import { applyMobileWorkbench } from './mobile-workbench.jsx';
 import { UsageLauncher, UsageDialog, mountUsageStyle } from './usage.jsx';
@@ -38,7 +39,7 @@ function update(patch) { if(patch.projects)patch={...patch,projects:patch.projec
 function useData() { return useSyncExternalStore(fn => { listeners.add(fn); return () => listeners.delete(fn); }, () => data); }
 async function api(action, args = {}, signal) {
   const res = await fetch(new URL('api/commander', document.baseURI), { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, ...args }), signal });
-  const value = await res.json(); if (!res.ok) throw new Error(value.error ?? `HTTP ${res.status}`); return value;
+  return readJsonResponse(res, new URL('api/commander', document.baseURI));
 }
 let stateSignature;
 async function refresh(signal) {
@@ -227,7 +228,7 @@ function Projects({ host, open, newSession, expandSidebar, wide = true }) {
     <div className="cmd-section-title">{wide && <button type="button" className="cmd-section-toggle" aria-expanded={sections.projects} aria-controls="cmd-project-section" onClick={() => toggleSection('projects')}><span>项目</span><UIIcon name="chevronDown" size={12} /></button>}<Hint label="添加项目"><button aria-label="添加项目目录" onClick={() => { if (!wide) expandSidebar?.(); setAdding(!wide || !adding); }}><UIIcon name="plus" size={16} /></button></Hint></div>
     {adding && <ProjectPicker host={host} api={api} onClose={() => setAdding(false)} onSelected={async project => { await refresh(); setAdding(false); newSession(project.id); }} />}
 
-    <ErrorLine message={d.error || error} />
+    <ErrorLine message={d.error || error || sidebarCapabilityWarning(d.capabilities)} />
     <div id="cmd-project-section" className="cmd-section-body" data-open={!wide || sections.projects} inert={wide && !sections.projects ? '' : undefined}><div className="cmd-section-inner">
     {!projectsLoaded && wide && <p className="cmd-sidebar-empty">正在读取项目…</p>}
     {projects.map(p => {

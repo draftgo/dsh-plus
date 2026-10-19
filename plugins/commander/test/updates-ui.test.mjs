@@ -1,3 +1,4 @@
+import { readJsonResponse } from '../client/http-response.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -23,8 +24,8 @@ async function mount(respond = () => initial(), props = {}, timers = {}) {
     Tooltip: ({ children }) => children, LinkIconMedium: () => React.createElement('svg', { 'data-github': true }),
   };
   runInNewContext(compiled, { module, exports: module.exports, document: dom.window.document, location: dom.window.location, URL, AbortController, AbortSignal, setInterval, clearInterval, ...timers,
-    fetch: async (url, options) => { const body = JSON.parse(options.body); calls.push(body); assert.equal(String(url), 'https://desktop.example/link/api/commander/updates'); assert.equal(options.credentials, 'same-origin'); const result = await respond(body); return { ok: !result?.httpError, status: result?.httpError || 200, json: async () => result }; },
-    require: id => id === 'react' ? React : id.includes('ui-primitives') ? primitives : id.endsWith('.css') ? '' : { UIIcon: () => null },
+    fetch: async (url, options) => { const body = JSON.parse(options.body); calls.push(body); assert.equal(String(url), 'https://desktop.example/link/api/commander/updates'); assert.equal(options.credentials, 'same-origin'); const result = await respond(body); return new Response(JSON.stringify(result), { status: result?.httpError || 200, headers: { 'content-type': 'application/json' } }); },
+    require: id => id === './http-response.mjs' ? { readJsonResponse } : id === 'react' ? React : id.includes('ui-primitives') ? primitives : id.endsWith('.css') ? '' : { UIIcon: () => null },
   });
   const root = createRoot(dom.window.document.getElementById('root'));
   const flush = callback => React.act(async () => { callback?.(); await new Promise(resolve => setImmediate(resolve)); });

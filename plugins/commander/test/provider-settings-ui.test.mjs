@@ -1,3 +1,4 @@
+import { readJsonResponse } from '../client/http-response.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -11,7 +12,7 @@ async function setup({ failSave = false, providerAccess = [] } = {}) {
   const values = [], effects = [], calls = []; let cursor = 0, mounted = false;
   const react = { useState: initial => { const id = cursor++; if (!(id in values)) values[id] = typeof initial === 'function' ? initial() : initial; return [values[id], value => { values[id] = typeof value === 'function' ? value(values[id]) : value; }]; }, useEffect: effect => { if (!mounted) effects.push(effect); } };
   const module = { exports: {} };
-  runInNewContext(code, { module, exports: module.exports, URL, AbortController, document: { baseURI: 'https://example.test/' }, fetch: async (_, request) => { const body = JSON.parse(request.body); calls.push(body); return { ok: !(failSave && body.action === 'setBindings'), json: async () => body.action === 'catalog' ? { tools: [{ id: 'codex', name: 'Codex', configSupported: true }, { id: 'pi', name: 'PI', configSupported: true }], providerAccess, bindings: { routergo: ['harness', 'codex'] } } : failSave ? { error: 'retry later' } : { bindings: { routergo: body.tools } } }; }, require: id => id === 'react' ? react : id.includes('ModelsSection') ? { ModelsSection() {} } : id.includes('ui-primitives') ? {} : id.includes('iconsax') ? {} : { default: '' } });
+  runInNewContext(code, { module, exports: module.exports, URL, AbortController, document: { baseURI: 'https://example.test/' }, fetch: async (_, request) => { const body = JSON.parse(request.body); calls.push(body); return new Response(JSON.stringify(body.action === 'catalog' ? { tools: [{ id: 'codex', name: 'Codex', configSupported: true }, { id: 'pi', name: 'PI', configSupported: true }], providerAccess, bindings: { routergo: ['harness', 'codex'] } } : failSave ? { error: 'retry later' } : { bindings: { routergo: body.tools } }), { status: failSave && body.action === 'setBindings' ? 500 : 200 }); }, require: id => id === './http-response.mjs' ? { readJsonResponse } : id === 'react' ? react : id.includes('ModelsSection') ? { ModelsSection() {} } : id.includes('ui-primitives') ? {} : id.includes('iconsax') ? {} : { default: '' } });
   const render = (id = 'routergo') => { cursor = 0; const result = module.exports.useProviderHarness(id); mounted = true; return result; };
   render(); for (const effect of effects) effect(); await new Promise(resolve => setTimeout(resolve, 0));
   return { render, calls };

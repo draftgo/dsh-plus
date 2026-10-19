@@ -37,6 +37,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var bridge: LinkBridge
     private var pendingBootstrap: String? = null
     private lateinit var devicesButton: android.widget.TextView
+    private lateinit var appearance: NativeAppearance
     private var workbenchIdentity: Identity? = null
     private var microphoneRequest: android.webkit.PermissionRequest? = null
     private var uploadCallback: android.webkit.ValueCallback<Array<android.net.Uri>>? = null
@@ -56,13 +57,14 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
         bridge = LinkBridge(this) { json ->
             pendingBootstrap = json
             dispatchBootstrap(json)
         }
         webView = WebView(this)
         localView = webView
-        layout = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL; setBackgroundColor(android.graphics.Color.rgb(248, 249, 251)) }
+        layout = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL; setBackgroundColor(android.graphics.Color.rgb(34, 34, 34)) }
         val density = resources.displayMetrics.density
         devicesButton = android.widget.TextView(this).apply {
             text = "‹  设备"; textSize = 14f; setTextColor(android.graphics.Color.rgb(67, 91, 117))
@@ -74,10 +76,16 @@ class MainActivity : AppCompatActivity() {
         layout.addView(devicesButton, android.widget.LinearLayout.LayoutParams(-1, (44 * density).toInt()))
         layout.addView(webView, android.widget.LinearLayout.LayoutParams(-1, 0, 1f))
         androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(layout) { view, insets ->
-            val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
-            view.setPadding(bars.left, bars.top, bars.right, bars.bottom); insets
+            val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars() or androidx.core.view.WindowInsetsCompat.Type.displayCutout())
+            val ime = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime())
+            val padding = ContentInsets(bars.left, bars.top, bars.right, bars.bottom).merge(ContentInsets(ime.left, ime.top, ime.right, ime.bottom))
+            view.setPadding(padding.left, padding.top, padding.right, padding.bottom)
+            // WebViews are already inside the native safe area. Do not send it twice.
+            androidx.core.view.WindowInsetsCompat.CONSUMED
         }
         setContentView(layout)
+        androidx.core.view.ViewCompat.requestApplyInsets(layout)
+        appearance = NativeAppearance(this, layout, devicesButton) { webView }
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
         webView.settings.allowFileAccess = false
@@ -88,6 +96,7 @@ class MainActivity : AppCompatActivity() {
         android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false)
         webView.webViewClient = localClient()
         webView.addJavascriptInterface(bridge, "LinkNative")
+        appearance.attach(webView, APP_ORIGIN)
         webView.loadUrl(START_URL)
         intent?.data?.let { handlePairUri(it.toString()) }
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
@@ -104,9 +113,20 @@ class MainActivity : AppCompatActivity() {
         intent.data?.let { handlePairUri(it.toString()) }
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (::appearance.isInitialized) appearance.resume()
+    }
+
+    override fun onPause() {
+        if (::appearance.isInitialized) appearance.pause()
+        super.onPause()
+    }
+
     override fun onDestroy() {
         microphoneRequest?.deny(); uploadCallback?.onReceiveValue(null)
         bridge.close()
+        appearance.close()
         localView.removeJavascriptInterface("LinkNative")
         workbenches.values.forEach { it.destroy() }; workbenches.clear()
         localView.destroy()
@@ -132,6 +152,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         override fun onPageFinished(view: WebView, url: String) {
+            appearance.pageReady(view)
             pendingBootstrap?.let { dispatchBootstrap(it) }
         }
     }
@@ -176,10 +197,11 @@ class MainActivity : AppCompatActivity() {
         if (webView === view) return
         layout.removeView(webView); webView = view
         layout.addView(view, android.widget.LinearLayout.LayoutParams(-1, 0, 1f))
+        appearance.show(view)
     }
     fun canOpenDevice(id: String): Boolean = workbenches.containsKey(id) || workbenches.size < 4
     fun forgetDevice(id: String) {
-        runOnUiThread { workbenches.remove(id)?.let { view -> if (view === webView) returnToDevices(); view.destroy() } }
+        runOnUiThread { workbenches.remove(id)?.let { view -> if (view === webView) returnToDevices(); appearance.detach(view); view.destroy() } }
     }
 
     fun openWorkbench(identity: Identity, cookie: String, isCurrent: () -> Boolean) {
@@ -197,7 +219,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 return@runOnUiThread
             }
-            cached?.let { workbenches.remove(identity.id); it.destroy() }
+            cached?.let { workbenches.remove(identity.id); appearance.detach(it); it.destroy() }
             val remote = WebView(this).apply {
                 settings.javaScriptEnabled = true; settings.domStorageEnabled = true
                 settings.allowFileAccess = false; settings.allowContentAccess = false
@@ -207,6 +229,7 @@ class MainActivity : AppCompatActivity() {
             }
             android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(remote, false)
             workbenches[identity.id] = remote
+            appearance.attach(remote, identity.url)
             showView(remote)
             workbenchIdentity = identity
             devicesButton.text = "‹  设备 · " + identity.publicJson().optString("name")
@@ -267,6 +290,7 @@ class MainActivity : AppCompatActivity() {
         }
         override fun onPageFinished(view: WebView, url: String) {
             if (allowed(android.net.Uri.parse(url))) {
+                appearance.pageReady(view)
                 val target = URI(url)
                 val path = target.rawPath + (target.rawQuery?.let { "?" + it } ?: "") + (target.rawFragment?.let { "#" + it } ?: "")
                 getSharedPreferences("link_locations", Context.MODE_PRIVATE).edit().putString(identity.id, path).apply()
@@ -275,7 +299,7 @@ class MainActivity : AppCompatActivity() {
         override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
             if (request.isForMainFrame && response.statusCode == 401) {
                 if (view === webView) returnToDevices()
-                workbenches.remove(identity.id, view); view.destroy()
+                workbenches.remove(identity.id, view); appearance.detach(view); view.destroy()
             }
         }
     }

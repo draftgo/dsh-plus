@@ -1,3 +1,4 @@
+import { readJsonResponse } from './http-response.mjs';
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { UIIcon } from './iconsax.jsx';
@@ -17,7 +18,7 @@ export function mountModelPicker(ctx) {
       const directory = ctx.modelDirectories.directoryFor(sessionId);
       return { available: ctx.sessions.subagentAddress(sessionId) === undefined, hooks: { directory: directory.store }, load: () => directory.load(), select: selection => directory.select(selection), binding: async () => {
         const response = await fetch(new URL('api/commander', document.baseURI), { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'binding', harnessSessionId: sessionId }) });
-        const value = await response.json(); if (!response.ok || value.error) throw Error(value.error || '会话绑定状态读取失败'); return value;
+        const value = await readJsonResponse(response, new URL('api/commander', document.baseURI)); if (value.error) throw Error(value.error || '会话绑定状态读取失败'); return value;
       }, openToolSettings: () => {
         const shell = ctx.slots.entries('sidebar.settings').find(entry => entry.children?.['settings.section']);
         const actions = shell?.store?.create().actions;
@@ -38,7 +39,7 @@ function NativeActivity({ sessionId }) {
     let active = true, timer, nativeId, cursor = 0, events = [];
     const request = async body => {
       const response = await fetch(new URL('api/commander', document.baseURI), { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-      const value = await response.json(); if (!response.ok || value.error) throw Error(value.error || '读取原生工具活动失败'); return value;
+      const value = await readJsonResponse(response, new URL('api/commander', document.baseURI)); if (value.error) throw Error(value.error || '读取原生工具活动失败'); return value;
     };
     const tick = async () => {
       try {
@@ -107,7 +108,7 @@ function ModelPicker({ locked, available, useDirectory, load, select, binding, o
     const controller = new AbortController(); setCatalogLoading(true); setCatalogError('');
     (async () => {
       const response = await fetch(new URL('api/commander/tooling', document.baseURI), { method: 'POST', credentials: 'same-origin', signal: controller.signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'pickerCatalog' }) });
-      const value = await response.json(); if (!response.ok || value.error) throw Error(typeof value.error === 'string' ? value.error : value.error?.message || '工具目录加载失败');
+      const value = await readJsonResponse(response, new URL('api/commander/tooling', document.baseURI)); if (value.error) throw Error(typeof value.error === 'string' ? value.error : value.error?.message || '工具目录加载失败');
       if (controller.signal.aborted) return;
       setCatalog(value); setTool(current => availableTools(value).some(entry => entry.id === current && entry.routeSupported) ? current : 'deepseek');
     })().catch(reason => { if (!controller.signal.aborted) setCatalogError(reason.message); }).finally(() => { if (!controller.signal.aborted) setCatalogLoading(false); });

@@ -1,3 +1,4 @@
+import { readJsonResponse } from './http-response.mjs';
 import React, { useState } from 'react';
 import { Modal, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives';
 import { ModelsSection } from '../../../deepseek-harness/packages/client/ui-settings-models/src/client/ModelsSection.tsx';
@@ -46,8 +47,8 @@ export function ProviderSelect({ value, options, disabled, label, customEnabled,
 
 async function toolingRequest(action, args = {}, signal) {
   const response = await fetch(new URL('api/commander/tooling', document.baseURI), { method: 'POST', credentials: 'same-origin', signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, ...args }) });
-  const value = await response.json();
-  if (!response.ok || value.error) throw Error(value.error || '无法读取 Harness 适用范围');
+  const value = await readJsonResponse(response, new URL('api/commander/tooling', document.baseURI));
+  if (value.error) throw Error(value.error || '无法读取 Harness 适用范围');
   return value;
 }
 const harnessEntry = { id: 'harness', name: 'DeepSeek Harness' };

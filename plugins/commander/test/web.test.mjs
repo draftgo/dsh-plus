@@ -1,24 +1,77 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
+import { EventEmitter } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Commander } from '../src/runtime.mjs';
 import { mountWeb } from '../src/web.mjs';
+import { DelegationBridge } from '../src/delegation.mjs';
 
-async function setup(t) {
+async function setup(t, dependencies) {
   const dir = await mkdtemp(join(tmpdir(), 'commander-web-'));
   const c = await new Commander({ dataDir: dir }).open();
-  const effects = []; let route;
+  const effects = [], routes = new Map(), warnings = [];
   const projects = new Map([['shared', { id: 'shared', path: dir, title: 'Shared', sessionIds: ['harness-session'] }]]);
-  const ctx = { effect(fn) { const dispose = fn(); effects.push(dispose); }, workspaceRegistry: { list: () => [...projects.values()], get: id => projects.get(id), create: async path => { const p = { id: 'new', path, title: 'New', sessionIds: [] }; projects.set(p.id,p); return p; } }, connection: { fetch: { register(r) { route = r; return async () => {}; } } } };
-  const api = await mountWeb(ctx, c);
+  const ctx = { effect(fn) { const dispose = fn(); effects.push(dispose); }, logger: { warn: message => warnings.push(message) }, workspaceRegistry: { list: () => [...projects.values()], get: id => projects.get(id), create: async path => { const p = { id: 'new', path, title: 'New', sessionIds: [] }; projects.set(p.id,p); return p; } }, connection: { fetch: { register(r) { routes.set(r.path, r); return async () => {}; } } } };
+  const api = await mountWeb(ctx, c, {}, dependencies);
   const provider = { config: {}, constructor: { capabilities: {} }, async connect(s,h) { return { nativeId: s.id, async submit(text) { h.event('turn.started'); h.event('text.delta',{text:`Result: ${text}`}); h.event('turn.completed',{status:'completed'}); }, async close() {} }; } };
   c.providers.set('codex',provider); c.providers.set('pi',provider);
   t.after(async () => { await c.close(); for (const dispose of effects.reverse()) await dispose?.(); await rm(dir,{recursive:true,force:true}); });
-  return { c, api, dir, route, ctx };
+  return { c, api, dir, route: routes.get('/api/commander'), ctx, warnings };
 }
+
+test('loopback listen failure preserves sidebar API and native sessions, with delegation failure observable', async t => {
+  const failure = Object.assign(new Error('listen EACCES: permission denied 127.0.0.1'), { code: 'EACCES' });
+  const server = new EventEmitter();
+  let closed = 0;
+  server.listen = () => { queueMicrotask(() => server.emit('error', failure)); };
+  server.closeAllConnections = () => {};
+  server.close = callback => { closed++; callback(); };
+  const { c, api, ctx, route, dir, warnings } = await setup(t, {
+    openDelegationBridge: commander => new DelegationBridge(commander, { serverFactory: () => server }).open(),
+  });
+  assert.equal(closed, 1);
+  assert.equal(server.listenerCount('error'), 0);
+  assert.equal(server.listenerCount('listening'), 0);
+  assert.equal(c.delegationBridge, undefined);
+  const response = await route.fetch(new Request('http://localhost/api/commander', { method: 'POST', body: JSON.stringify({ action: 'state' }) }));
+  assert.equal(response.status, 200);
+  const state = await response.json();
+  assert.equal(state.projects[0].id, 'shared');
+  assert.deepEqual(state.sessions, []);
+  assert.deepEqual(state.capabilities.delegation, { available: false, error: failure.message, code: 'EACCES' });
+  assert.equal(state.capabilities.fonts.available, true);
+  assert.ok(warnings.some(message => message.includes(failure.message)));
+  ctx.baseUrl = pathToFileURL(`${dir}/`).href;
+  const recent = await route.fetch(new Request('http://localhost/api/commander', { method: 'POST', body: JSON.stringify({ action: 'ensureRecent' }) }));
+  assert.equal(recent.status, 200);
+  assert.ok((await recent.json()).workspaceId);
+  const session = (await api({ action: 'start', provider: 'codex', projectId: 'shared', requestId: 'bridge-failed', text: 'hello' })).session;
+  assert.equal(session.status, 'idle');
+  await assert.rejects(c.delegate(session.id, { provider: 'pi', text: 'child' }), error => error.cause === failure && /delegation unavailable/.test(error.message));
+});
+
+test('font initialization failure does not remove sidebar routes or delegation', async t => {
+  const failure = Object.assign(new Error('font manifest is unavailable'), { code: 'ENOENT' });
+  const { c, api, route, warnings } = await setup(t, { mountFonts: async () => { throw failure; } });
+  assert.equal(route.path, '/api/commander');
+  assert.ok(c.delegationBridge.url);
+  const state = await api({ action: 'state' });
+  assert.equal(state.capabilities.delegation.available, true);
+  assert.deepEqual(state.capabilities.fonts, { available: false, error: failure.message, code: 'ENOENT' });
+  assert.ok(warnings.some(message => message.includes(failure.message)));
+});
+
+test('corrupt persisted dismissals are retained and reported instead of reset', async t => {
+  const { c, ctx, dir } = await setup(t);
+  const path = join(dir, 'dismissed-harness.json');
+  const corrupt = '{broken json';
+  await writeFile(path, corrupt);
+  await assert.rejects(mountWeb(ctx, c), SyntaxError);
+  assert.equal(await readFile(path, 'utf8'), corrupt);
+});
 
 test('direct sessions share Harness projects, submit without a model router, and retain native identity', async t => {
   const { c, api, dir, route } = await setup(t);

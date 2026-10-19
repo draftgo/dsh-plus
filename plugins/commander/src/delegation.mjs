@@ -10,9 +10,9 @@ export const delegationSchema = { type: 'object', properties: {
 
 /** Per-process, per-session capability endpoint for native MCP/extension tools. No public listener. */
 export class DelegationBridge {
-  constructor(commander) { this.commander = commander; this.tokens = new Map(); }
+  constructor(commander, { serverFactory = createServer } = {}) { this.commander = commander; this.tokens = new Map(); this.serverFactory = serverFactory; }
   async open() {
-    this.server = createServer(async (req, res) => {
+    this.server = this.serverFactory(async (req, res) => {
       const id = this.tokens.get(req.headers.authorization?.replace(/^Bearer /, ''));
       res.setHeader('Content-Type', 'application/json');
       if (!id || req.method !== 'POST' || req.url !== '/delegate') { res.writeHead(403); res.end('{}'); return; }
@@ -21,7 +21,15 @@ export class DelegationBridge {
         res.end(JSON.stringify(await this.commander.delegate(id, JSON.parse(body))));
       } catch (error) { res.writeHead(400); res.end(JSON.stringify({ error: error.message })); }
     });
-    await new Promise((resolve, reject) => { this.server.once('error', reject); this.server.listen(0, '127.0.0.1', resolve); });
+    try {
+      await new Promise((resolve, reject) => {
+        const failed = error => { this.server.removeListener('listening', ready); this.server.removeListener('error', failed); reject(error); };
+        const ready = () => { this.server.removeListener('error', failed); resolve(); };
+        this.server.once('error', failed);
+        this.server.once('listening', ready);
+        try { this.server.listen(0, '127.0.0.1'); } catch (error) { failed(error); }
+      });
+    } catch (error) { await this.close(); throw error; }
     this.url = `http://127.0.0.1:${this.server.address().port}/delegate`;
     return this;
   }
@@ -30,5 +38,10 @@ export class DelegationBridge {
     return { url: this.url, token, command: process.execPath, script: fileURLToPath(new URL('./mcp.mjs', import.meta.url)), schema: delegationSchema };
   }
   revoke(id) { for (const [token, owner] of this.tokens) if (owner === id) this.tokens.delete(token); }
-  async close() { this.tokens.clear(); this.server.closeAllConnections(); await new Promise(resolve => this.server.close(resolve)); }
+  async close() {
+    this.tokens.clear();
+    if (!this.server) return;
+    this.server.closeAllConnections();
+    await new Promise(resolve => this.server.close(resolve));
+  }
 }

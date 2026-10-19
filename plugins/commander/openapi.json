@@ -3,7 +3,7 @@
   "info": {
     "title": "DSH-Plus Harness 工具管理",
     "version": "1.1.0",
-    "description": "官方 owner 通道的工具设置接口。仅本机 owner 可管理；Link 远程会话不可调用。不通过 MCP 向 Agent 暴露安装或配置写入权限。"
+    "description": "官方 owner 通道的侧栏状态与工具设置接口；已配对工作台仅通过 Link 既有转发白名单访问。工具安装与本机配置写入仍受对应权限限制，不通过 MCP 向 Agent 暴露安装或配置写入权限。"
   },
   "servers": [
     {
@@ -78,6 +78,88 @@
           },
           "415": {
             "description": "Content-Type 不是 application/json。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/commander": {
+      "post": {
+        "summary": "原生会话与项目侧栏操作",
+        "description": "通过现有 owner 认证 Connection 通道调用。state 返回项目、会话、隐藏记录及可选能力状态；ensureRecent 恢复最近工作区。委派 loopback 监听或字体初始化失败不撤销本接口，capabilities 对应 available=false，并保留 error/code。损坏的用户持久化数据仍报错，不重置。其他会话操作保持既有语义。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "action"
+                ],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "state",
+                      "ensureRecent",
+                      "binding",
+                      "browse",
+                      "clone",
+                      "dismiss",
+                      "doctor",
+                      "project",
+                      "models",
+                      "create",
+                      "start",
+                      "events",
+                      "adopt",
+                      "archive",
+                      "delete",
+                      "send",
+                      "connect",
+                      "interrupt",
+                      "steer",
+                      "close",
+                      "history",
+                      "approve"
+                    ]
+                  }
+                },
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "state 返回 SidebarState；ensureRecent 返回 RecentWorkspace；其他操作返回对应结果。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SidebarState"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RecentWorkspace"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入或操作失败；已有会话身份可随 session 字段返回。",
             "content": {
               "application/json": {
                 "schema": {
@@ -365,6 +447,93 @@
             "type": "string"
           }
         }
+      },
+      "OptionalWebCapability": {
+        "type": "object",
+        "required": [
+          "available"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string",
+            "description": "初始化失败的实际错误消息，仅不可用时存在。"
+          },
+          "code": {
+            "type": "string",
+            "description": "原始错误码，如 EACCES；原异常未提供时省略。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SidebarState": {
+        "type": "object",
+        "required": [
+          "projects",
+          "sessions",
+          "deletedHarnessIds",
+          "capabilities"
+        ],
+        "properties": {
+          "projects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "sessions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "deletedHarnessIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "capabilities": {
+            "type": "object",
+            "required": [
+              "delegation",
+              "fonts"
+            ],
+            "properties": {
+              "delegation": {
+                "$ref": "#/components/schemas/OptionalWebCapability"
+              },
+              "fonts": {
+                "$ref": "#/components/schemas/OptionalWebCapability"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "RecentWorkspace": {
+        "type": "object",
+        "required": [
+          "workspaceId",
+          "path"
+        ],
+        "properties": {
+          "workspaceId": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       }
     }
   }

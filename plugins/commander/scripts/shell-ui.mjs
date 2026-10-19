@@ -7,6 +7,7 @@ const once=(source,before,after)=>{if(source.split(before).length!==2)throw Erro
 export function shellUi(){return {name:'commander-shell-ui',setup(build){
   build.onLoad({filter:/ui-settings-general[\\/]src[\\/]client[\\/]SettingsRoot\.tsx$/},async({path})=>{
     let source=(await readFile(path,'utf8')).replaceAll('\r\n','\n');
+    source=once(source,'className={css.overlay} role="presentation"', "className={css.overlay + ' cmd-settings-overlay'} role=\"presentation\"");
     source=once(source,'function navIcon(id: string) {',
       'function navIcon(id: string) {\n'+
       '  if (id === "link") return <span className={css.navIcon} style={{ display: "inline-flex", width: 16, height: 16 }} aria-hidden="true" dangerouslySetInnerHTML={{ __html: '+JSON.stringify(linkIcon)+' }} />\n'+

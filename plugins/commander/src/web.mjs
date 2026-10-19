@@ -15,7 +15,7 @@ const text = (value, name, max = 20000) => {
 };
 
 /** Mount direct-engine controls on the existing authenticated owner-only Connection carrier. */
-export async function mountWeb(ctx, commander, config = {}) {
+export async function mountWeb(ctx, commander, config = {}, dependencies = {}) {
   const maxDepth = config.maxDelegationDepth ?? 3;
   const maxChildren = config.maxDelegationChildren ?? 12;
   if (!Number.isSafeInteger(maxDepth) || maxDepth < 1 || maxDepth > 8) throw new Error('maxDelegationDepth must be an integer from 1 to 8');
@@ -33,9 +33,12 @@ export async function mountWeb(ctx, commander, config = {}) {
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
   let dismissWrites = Promise.resolve();
   ctx.effect(() => () => dismissWrites);
-  const bridge = await new DelegationBridge(commander).open();
-  commander.delegationBridge = bridge;
-  ctx.effect(() => async () => { commander.delegationBridge = undefined; await bridge.close(); });
+  const capabilities = { delegation: { available: false }, fonts: { available: false } };
+  let delegationError;
+  const unavailable = (name, error) => {
+    capabilities[name] = { available: false, error: error.message, ...(error.code ? { code: error.code } : {}) };
+    ctx.logger?.warn?.(`DSH-Plus ${name} unavailable: ${error.message}`);
+  };
   const project = id => {
     const p = ctx.workspaceRegistry.get(text(id, 'projectId', 200));
     if (!p) throw new Error('Project no longer exists');
@@ -50,6 +53,7 @@ export async function mountWeb(ctx, commander, config = {}) {
     projects: ctx.workspaceRegistry.list().map(p => ({ id: p.id, path: p.path, title: p.title, sessionIds: p.sessionIds })),
     sessions: commander.list(),
     deletedHarnessIds: [...deletedHarnessIds],
+    capabilities,
   });
   const result = id => {
     const s = commander.snapshot(id);
@@ -61,6 +65,7 @@ export async function mountWeb(ctx, commander, config = {}) {
     };
   };
   commander.delegate = async (parentId, args) => {
+    if (delegationError) throw new Error(`Native delegation unavailable: ${delegationError.message}`, { cause: delegationError });
     const parent = commander.snapshot(parentId);
     if (!parent.ownerSessionId) throw new Error('Native delegation requires an owning conversation');
     if (!args || typeof args !== 'object') throw new Error('Invalid delegation arguments');
@@ -219,7 +224,6 @@ export async function mountWeb(ctx, commander, config = {}) {
     if (action === 'approve') { commander.approve(s.id, text(input.approvalId, 'approvalId', 200), input.answer); return commander.snapshot(s.id); }
     throw new Error(`Unknown DSH-Plus action: ${action}`);
   };
-  await mountFonts(ctx);
   ctx.effect(() => ctx.connection.fetch.register({
     path: '/api/commander', methods: ['POST'], requestBody: 'buffered',
     async fetch(request) {
@@ -227,5 +231,19 @@ export async function mountWeb(ctx, commander, config = {}) {
       catch (error) { return Response.json({ error: error.message, ...(error.session ? { session: error.session } : {}) }, { status: 400, headers: { 'cache-control': 'no-store' } }); }
     },
   }));
+  // Optional localhost MCP and fonts must not remove the sidebar's core API.
+  try {
+    const bridge = await (dependencies.openDelegationBridge ?? (c => new DelegationBridge(c).open()))(commander);
+    commander.delegationBridge = bridge;
+    ctx.effect(() => async () => {
+      if (commander.delegationBridge === bridge) commander.delegationBridge = undefined;
+      await bridge.close();
+    });
+    capabilities.delegation = { available: true };
+  } catch (error) { delegationError = error; unavailable('delegation', error); }
+  try {
+    await (dependencies.mountFonts ?? mountFonts)(ctx);
+    capabilities.fonts = { available: true };
+  } catch (error) { unavailable('fonts', error); }
   return dispatch;
 }

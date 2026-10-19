@@ -8,6 +8,8 @@
 
 会话选中态要求明确的活动会话 ID，未打开对话时不高亮任何行；未迁移的子代理不会跟随父会话误选中。前端构建启用压缩；首次远端访问仍需下载官方首屏资源，本机接口耗时不代表用户网络上的完整加载时间，测量记录见 [验证记录](VERIFICATION.md)。
 
+侧栏基础 API 独立于可选的本机委派桥和字体初始化。`POST /api/commander` 的 `state` 返回 `capabilities.delegation` / `capabilities.fonts`（`available`，失败时附原始 `error` / `code`）；失败同时写入日志，界面可明确提示。委派桥监听失败时项目、会话与 `ensureRecent` 仍可用，普通原生会话继续运行；委派调用保留原始异常原因并明确报错。损坏的用户数据不会自动清空或重置。接口契约见 [OpenAPI](openapi.json)。
+
 ### RouterGo 的 DeepSeek 路由
 
 供应商编辑器的“适用工具”横向排列，窄屏自动换行。第三方供应商在“自定义设置 → 模型列表 → 展开模型”中配置该模型的思考档位，支持继承目录、非推理、预设和自定义映射；草稿随供应商一起保存，取消不生效。自定义复用官方 `reasoningEfforts`：档位键限 `off/minimal/low/medium/high/xhigh/max`，协议值可按网关修改（如 `max: ultra`）；只有 `off` 可不发送值，必须保留至少一个思考档位。使用 DeepSeek 工具直接调用第三方 API 时，在模型菜单选择实际档位；Codex、Claude Code 等原生工具使用“设置 → Harness → 对应工具”的推理强度配置，保存默认方案后新建对话生效，不借用 API 适配器的档位映射。声明能力不保证服务端支持，DeepSeek 等协议差异仍需按下方示例配置 `compat`。原生 DeepSeek 使用官方固定档位，不套用第三方映射编辑器。实现基于 Harness `571902028a75c64c1d767f4ae5fd099485f0ddf0`，通过插件构建适配复用官方草稿与保存流程，不修改子模块。

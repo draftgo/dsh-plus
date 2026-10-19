@@ -56,3 +56,13 @@ export async function startSidebarSession(host,projects,projectId,defaultId,ensu
   if(!target)throw Error('最近工作区创建失败，请重试');
   host.uiWorkspace.startSession(target);return target;
 }
+
+/** Optional startup failures stay visible without hiding conversations. */
+export function sidebarCapabilityWarning(capabilities) {
+  return [['delegation', '原生委派'], ['fonts', '界面字体']].flatMap(([id, label]) => {
+    const value = capabilities?.[id];
+    if (value?.available !== false || !value.error) return [];
+    const detail = String(value.error).replace(/\s+/g, ' ').trim().slice(0, 200);
+    return [label + '暂不可用：' + detail];
+  }).join('\n');
+}

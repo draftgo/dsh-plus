@@ -70,6 +70,7 @@ function readAsset(name) {
 }
 for (const [asset, file] of [
   ['assets/app.js', 'plugins/link/dist/web/app.js'],
+  ['assets/native-appearance.js', 'plugins/link/mobile/android/app/src/main/assets/native-appearance.js'],
   ['assets/server/server-seed.bundle', 'plugins/link/dist/server/server-seed.tar.gz'],
   ['assets/server/manifest.json', 'plugins/link/dist/server/manifest.json'],
 ]) {

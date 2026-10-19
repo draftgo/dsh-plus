@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {isRecentWorkspace,projectWorkspaces,recentRows,startSidebarSession,isSidebarSessionSelected,sidebarWorkspaces,ensureSidebarWorkspace,sidebarSessionStatus} from '../client/sidebar-state.mjs';
+import {isRecentWorkspace,projectWorkspaces,recentRows,startSidebarSession,isSidebarSessionSelected,sidebarWorkspaces,ensureSidebarWorkspace,sidebarSessionStatus,sidebarCapabilityWarning} from '../client/sidebar-state.mjs';
 const projects=[{id:'auto',isDefault:true,title:'default-workspace',path:'/home/user/Documents/deepseek-harness/default-workspace'},{id:'user',title:'default-workspace',path:'/projects/default-workspace'},{id:'named',title:'自己的项目',path:'/projects/named'}];
 test('session list uses official unread completion and preserves execution priorities',()=>{
  const official={blank:false,running:false};
@@ -89,4 +89,11 @@ test('native owner matches only its primary or adopted session, not every delega
  const rows=[{id:'primary',native:true,ownerSessionId:'harness'},{id:'child',native:true,parentId:'primary',ownerSessionId:'harness'},{id:'adopted',native:true,parentId:'primary',ownerSessionId:'independent',harnessAdopted:true},{id:'other',native:true,ownerSessionId:'unrelated'}];
  assert.deepEqual(rows.filter(row=>isSidebarSessionSelected(row,'harness')).map(row=>row.id),['primary']);
  assert.deepEqual(rows.filter(row=>isSidebarSessionSelected(row,'independent')).map(row=>row.id),['adopted']);
+});
+
+test('startup capability failures remain specific and never mark healthy or pending services failed', () => {
+  assert.equal(sidebarCapabilityWarning(), '');
+  assert.equal(sidebarCapabilityWarning({ delegation: { available: true }, fonts: { available: false } }), '');
+  assert.equal(sidebarCapabilityWarning({ delegation: { available: false, error: 'listen EACCES 127.0.0.1' }, fonts: { available: true } }), '原生委派暂不可用：listen EACCES 127.0.0.1');
+  assert.equal(sidebarCapabilityWarning({ delegation: { available: false, error: 'MCP\nfailed' }, fonts: { available: false, error: 'missing manifest' } }), '原生委派暂不可用：MCP failed\n界面字体暂不可用：missing manifest');
 });

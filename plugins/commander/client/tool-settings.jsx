@@ -1,3 +1,4 @@
+import { readJsonResponse } from './http-response.mjs';
 import React, { useEffect, useRef, useState } from 'react';
 import { Modal, Menu, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives';
 import { UIIcon } from './iconsax.jsx';
@@ -11,8 +12,8 @@ import css from './tool-settings.css';
 export function mountToolSettingsStyle(ctx) { const style = document.createElement('style'); style.textContent = css; document.head.append(style); ctx.effect(() => () => style.remove()); }
 async function request(action, fields = {}, signal) {
   const response = await fetch(new URL('api/commander/tooling', document.baseURI), { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, ...fields }), signal });
-  const value = await response.json();
-  if (!response.ok || value.error) throw Error(value.error || '工具管理请求失败');
+  const value = await readJsonResponse(response, new URL('api/commander/tooling', document.baseURI));
+  if (value.error) throw Error(value.error || '工具管理请求失败');
   return value;
 }
 const array = value => Array.isArray(value) ? value : Object.values(value || {});

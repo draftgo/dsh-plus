@@ -78,11 +78,19 @@
   }
   .cmd-shell-frame [contenteditable="true"] { min-height: 44px; -webkit-user-select: text; user-select: text; }
   .cmd-shell-frame [data-conversation-scroll] { overscroll-behavior-y: contain; }
+  /* Portals live outside the frame, so they need their own safe viewport.
+     Native Android already consumes insets; browsers publish them through env(). */
+  .cmd-settings-overlay {
+    inset: 0 0 auto; height: var(--cmd-mobile-viewport-height, 100dvh);
+    box-sizing: border-box;
+    padding: calc(12px + env(safe-area-inset-top, 0px))
+      calc(8px + env(safe-area-inset-right, 0px))
+      calc(12px + env(safe-area-inset-bottom, 0px))
+      calc(8px + env(safe-area-inset-left, 0px));
+  }
   /* The official settings portal becomes a single-column sheet with scrollable tabs. */
   [data-shortcut-modal="settings"][role="dialog"] {
-    width: calc(100vw - 16px); max-width: calc(100vw - 16px);
-    height: calc(var(--cmd-mobile-viewport-height, 100dvh) - 24px);
-    max-height: calc(var(--cmd-mobile-viewport-height, 100dvh) - 24px);
+    width: 100%; max-width: 100%; height: 100%; max-height: 100%; min-height: 0;
     flex-direction: column; border-radius: 16px;
   }
   [data-shortcut-modal="settings"] > nav { width: 100%; padding: 16px 12px 8px; gap: 10px; }
@@ -104,7 +112,7 @@
   [data-shortcut-modal="settings"] .voice-setting-toggle { gap: 12px; }
   [data-shortcut-modal="settings"] .voice-model-actions,
   [data-shortcut-modal="settings"] .voice-settings footer { flex-wrap: wrap; }
-  [role="dialog"]:not([aria-label="工作台导航"]) { max-width: calc(100vw - 16px); box-sizing: border-box; }
+  [role="dialog"]:not([aria-label="工作台导航"]):not([data-shortcut-modal="settings"]) { max-width: calc(100vw - 16px); box-sizing: border-box; }
   [role="menu"], [role="listbox"] { max-width: calc(100vw - 16px); max-height: min(420px, 65dvh); overflow-y: auto; }
 }
 @media (max-width: 767px) and (prefers-reduced-motion: reduce) {

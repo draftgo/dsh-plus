@@ -39,5 +39,19 @@ try {
   const response = await fetch(new URL('/api/commander-link', ready.url), { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'status' }) });
   const status = await response.json();
   if (!response.ok || status.enabled !== false) throw new Error(`Packaged Plus management route failed: ${JSON.stringify(status)}`);
+  const sidebarCall = async input => {
+    const result = await fetch(new URL('/api/commander', ready.url), { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(input) });
+    const body = await result.text();
+    if (!result.ok || !result.headers.get('content-type')?.includes('application/json')) throw new Error(`Packaged sidebar ${input.action} returned ${result.status}: ${body.slice(0, 500)}`);
+    return JSON.parse(body);
+  };
+  const sidebar = await sidebarCall({ action: 'state' });
+  if (!Array.isArray(sidebar.projects) || !Array.isArray(sidebar.sessions)) throw new Error('Packaged sidebar state is incomplete');
+  const recent = await sidebarCall({ action: 'ensureRecent' });
+  if (!recent.workspaceId || !recent.path || !(await sidebarCall({ action: 'state' })).projects.some(project => project.id === recent.workspaceId)) throw new Error('Packaged sidebar could not recover its recent workspace');
+  const fontManifest = JSON.parse(await readFile(join(state.directory, 'node_modules/dsh-plus/assets/fonts/manifest.json')));
+  const font = await fetch(new URL('/api/commander-fonts/' + fontManifest[0].file, ready.url), { headers: { cookie } });
+  if (!font.ok || Buffer.from(await font.arrayBuffer()).subarray(0, 4).toString() !== 'wOF2') throw new Error('Packaged sidebar font could not be loaded');
+  console.log('Packaged authenticated sidebar state, recent workspace recovery and font asset passed.');
   console.log('Packaged DSH runtime, offline Plus enrollment and authenticated Link management passed.');
 } finally { try { await host?.stop(); } finally { await rm(temporary, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }); } }
