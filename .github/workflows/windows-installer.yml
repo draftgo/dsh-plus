@@ -76,6 +76,7 @@ jobs:
           '@ | node --input-type=module
           exit $LASTEXITCODE
       - name: Retain installer
+        if: ${{ always() && hashFiles('artifacts/windows/*-win-x64-setup.exe') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: dsh-plus-windows-x64

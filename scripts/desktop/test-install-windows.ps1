@@ -6,6 +6,86 @@ $installer = $installers[0]
 $previousHome = $env:DSH_HOME
 $env:DSH_HOME = Join-Path $env:RUNNER_TEMP 'dsh-plus-installer-smoke'
 
+# WScript.Shell can expose the ANSI shell-link target on non-Chinese Windows.
+# Read IShellLinkW explicitly so the Unicode executable name remains intact.
+if (-not ('XiaojiaoInstallerShortcut' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+using System.Text;
+
+public static class XiaojiaoInstallerShortcut
+{
+    [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+    private class ShellLink { }
+
+    [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IShellLinkW
+    {
+        void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int capacity, IntPtr findData, uint flags);
+        void GetIDList(out IntPtr pidl);
+        void SetIDList(IntPtr pidl);
+        void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, int capacity);
+        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string text);
+        void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int capacity);
+        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string path);
+        void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder arguments, int capacity);
+        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string arguments);
+        void GetHotkey(out short hotkey);
+        void SetHotkey(short hotkey);
+        void GetShowCmd(out int command);
+        void SetShowCmd(int command);
+        void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int capacity, out int index);
+        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string path, int index);
+        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string path, uint reserved);
+        void Resolve(IntPtr window, uint flags);
+        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string path);
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetLongPathNameW(string shortPath, StringBuilder longPath, uint capacity);
+
+    public sealed class ShortcutDetails
+    {
+        public string TargetPath { get; set; }
+        public string Arguments { get; set; }
+        public string WorkingDirectory { get; set; }
+    }
+
+    public static ShortcutDetails Read(string path)
+    {
+        object instance = new ShellLink();
+        try
+        {
+            ((IPersistFile)instance).Load(path, 0);
+            var link = (IShellLinkW)instance;
+            var target = new StringBuilder(32768);
+            var arguments = new StringBuilder(32768);
+            var working = new StringBuilder(32768);
+            link.GetPath(target, target.Capacity, IntPtr.Zero, 0);
+            link.GetArguments(arguments, arguments.Capacity);
+            link.GetWorkingDirectory(working, working.Capacity);
+            return new ShortcutDetails { TargetPath = target.ToString(), Arguments = arguments.ToString(), WorkingDirectory = working.ToString() };
+        }
+        finally { Marshal.FinalReleaseComObject(instance); }
+    }
+
+    public static string ExistingLongPath(string path)
+    {
+        if (String.IsNullOrEmpty(path) || !File.Exists(path)) throw new FileNotFoundException("Shortcut target must be an existing file", path);
+        var output = new StringBuilder(32768);
+        uint length = GetLongPathNameW(Path.GetFullPath(path), output, (uint)output.Capacity);
+        if (length == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (length >= output.Capacity) throw new IOException("Shortcut target path exceeds the supported length");
+        return output.ToString();
+    }
+}
+'@
+}
+
 function Install-Silently([string]$Path) {
     $process = Start-Process -FilePath $Path -ArgumentList '/S' -Wait -PassThru
     if ($process.ExitCode -ne 0) { throw "Installer exited $($process.ExitCode)" }
@@ -29,7 +109,12 @@ function Assert-Plus([System.IO.FileInfo]$Installed) {
     $shortcut = Join-Path $env:APPDATA 'Microsoft/Windows/Start Menu/Programs/小角.lnk'
     if (-not (Test-Path $shortcut)) { throw '小角 Start Menu shortcut is missing' }
     $shell = New-Object -ComObject WScript.Shell
-    if ($shell.CreateShortcut($shortcut).TargetPath -ne $Installed.FullName) { throw 'Start Menu shortcut does not launch 小角.exe' }
+    $scriptLink = $shell.CreateShortcut($shortcut)
+    $nativeLink = [XiaojiaoInstallerShortcut]::Read($shortcut)
+    Write-Output ([ordered]@{ shortcut = $shortcut; installed = $Installed.FullName; wscriptTarget = $scriptLink.TargetPath; nativeTarget = $nativeLink.TargetPath; arguments = $nativeLink.Arguments; workingDirectory = $nativeLink.WorkingDirectory } | ConvertTo-Json -Compress)
+    $target = [XiaojiaoInstallerShortcut]::ExistingLongPath($nativeLink.TargetPath)
+    $expected = [XiaojiaoInstallerShortcut]::ExistingLongPath($Installed.FullName)
+    if (-not [String]::Equals($target, $expected, [StringComparison]::OrdinalIgnoreCase) -or [System.IO.Path]::GetFileName($target) -ne '小角.exe' -or $nativeLink.Arguments -ne '') { throw 'Start Menu shortcut does not launch 小角.exe without arguments' }
 }
 try {
     Install-Silently $installer.FullName

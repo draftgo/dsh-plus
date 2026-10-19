@@ -240,6 +240,7 @@ node --test plugins/commander/test/commands.test.mjs plugins/commander/test/runt
 - 应用 0.1.4、DSH-Plus 0.1.6、Link 0.1.2；新版正式 VI 同步 PC 与 Android，应用显示名统一“小角”，内部更新身份与用户数据路径保留。初始化加入左侧小角浮动与右侧 DeepSeek，并保留自动进入、失败重试及减少动态效果支持。
 - Commander 全套 351/351、Link 全套 73/73、插件更新与打包 18/18、新品牌/初始化/应用更新/布局定向 25/25 通过；最终 build:plus、npm run check、git diff --check 通过。官方子模块保持原 pin 且 clean。
 - Android assembleRelease、lintVitalRelease、5/5 原生单测通过；正式 APK 校验显示名小角、0.1.4/code4、不可调试、持久发行证书匹配，以及最新前端/服务器包/清单逐字节一致。Windows 配置与新旧更新名、LF/CRLF 兼容定向测试 7/7；原生运行、静默安装和旧版原位升级由发布 CI 执行。
+- 原生 Windows CI 已完成整包构建及 packaged-runtime smoke；首轮静默安装验证在 WScript.Shell 快捷方式目标字符串比较处阻断，尚未进入旧版升级。改用 IShellLinkW 读取 Unicode 目标并规范长路径后继续严格核验；全部安装/升级验证完成前不公开正式版本。
 
 ## 2026-10-19 Codex 开箱即用安装
 
