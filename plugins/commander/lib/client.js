@@ -2549,7 +2549,7 @@ select.ModelsSection_input {
 
 .cmd-update-actions{flex-wrap:wrap}.cmd-update-action-buttons{display:inline-flex;align-items:center;justify-content:flex-end;gap:10px;flex:none;margin-left:auto}.cmd-update-actions>.cmd-update-action-buttons{font-size:12px}.cmd-update-action-buttons button:disabled{cursor:not-allowed}.cmd-update-launcher,.cmd-update-dialog{touch-action:manipulation}.cmd-update-launcher>.cmd-update-icon{pointer-events:none}
 `;var qg=require("react");var vs=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-<rect x="0" y="0" width="1024" height="1024" rx="232" fill="#EDE4D3"/><g transform="translate(167,282) scale(1.15)"><rect x="0" y="0" width="600" height="400" rx="100" fill="#F3EBDF"/><path d="M 400 400 L 500 400 A 100 100 0 0 0 600 300 L 600 200 Z" fill="#D44A36"/><rect x="89" y="141" width="78" height="118" rx="39" fill="#222222"/><rect x="227" y="141" width="78" height="118" rx="39" fill="#222222"/></g>
+<rect x="0" y="0" width="1024" height="1024" rx="232" fill="#222222"/><g transform="translate(167,282) scale(1.15)"><rect x="0" y="0" width="600" height="400" rx="100" fill="#F3EBDF"/><path d="M 400 400 L 500 400 A 100 100 0 0 0 600 300 L 600 200 Z" fill="#D44A36"/><rect x="89" y="141" width="78" height="118" rx="39" fill="#222222"/><rect x="227" y="141" width="78" height="118" rx="39" fill="#222222"/></g>
 </svg>
 `;var Ds=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400">
 <rect x="0" y="0" width="600" height="400" rx="100" fill="#F3EBDF"/><path d="M 400 400 L 500 400 A 100 100 0 0 0 600 300 L 600 200 Z" fill="#D44A36"/><circle cx="128" cy="200" r="39" fill="#222222"/><circle cx="266" cy="200" r="39" fill="#222222"/>

@@ -9,11 +9,12 @@ const { JSDOM } = createRequire(new URL('../../../deepseek-harness/package.json'
 const source = readFileSync(new URL('../../link/client/brand.jsx', import.meta.url), 'utf8');
 const code = transformSync(source, { loader: 'jsx', format: 'cjs' }).code;
 
-test('the shared app icon uses the approved light-beige VI while small favicons retain simplified eyes', () => {
+test('the shared app icon uses the approved dark-background VI while small favicons retain simplified eyes', () => {
   const logo = new JSDOM(readFileSync(new URL('../../../assets/brand/dsh-plus-logo.svg', import.meta.url), 'utf8'), { contentType: 'image/svg+xml' });
   const favicon = new JSDOM(readFileSync(new URL('../../../assets/brand/favicon.svg', import.meta.url), 'utf8'), { contentType: 'image/svg+xml' });
   assert.equal(logo.window.document.documentElement.getAttribute('viewBox'), '0 0 1024 1024');
-  assert.equal(logo.window.document.querySelector('rect').getAttribute('fill'), '#EDE4D3');
+  assert.equal(logo.window.document.querySelector('rect').getAttribute('fill'), '#222222');
+  assert.equal(logo.window.document.querySelector('rect').getAttribute('rx'), '232');
   assert.equal(logo.window.document.querySelector('g').getAttribute('transform'), 'translate(167,282) scale(1.15)');
   assert.equal(favicon.window.document.querySelectorAll('circle').length, 2);
   logo.window.close();

@@ -9,8 +9,7 @@ export async function prepareDesktopBrand(root, output) {
   const sharp = require('sharp');
   const brand = join(root, 'assets/brand');
   const logo = join(brand, 'dsh-plus-logo.png');
-  const mark = join(brand, 'dsh-plus-mark.svg');
-  const mascot = (await readFile(mark)).toString('base64');
+  const mascot = (await readFile(join(brand, 'dsh-plus-logo.svg'))).toString('base64');
   await mkdir(output, { recursive: true });
 
   const sizes = [16, 20, 24, 32, 40, 48, 64, 128, 256];
@@ -34,7 +33,7 @@ export async function prepareDesktopBrand(root, output) {
     for (const dark of [false, true]) {
       const width = 600 * scale, height = 196 * scale;
       const background = dark ? '#151517' : '#ffffff';
-      const artwork = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 600 196"><rect width="600" height="196" fill="${background}"/><image href="data:image/svg+xml;base64,${mascot}" x="198" y="66" width="96" height="64"/><text x="314" y="111" font-family="Segoe UI,Microsoft YaHei UI,Microsoft YaHei,Arial,sans-serif" font-size="36" font-weight="600" fill="${dark ? '#ffffff' : '#222222'}">小角</text></svg>`);
+      const artwork = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 600 196"><rect width="600" height="196" fill="${background}"/><image href="data:image/svg+xml;base64,${mascot}" x="198" y="50" width="96" height="96"/><text x="314" y="111" font-family="Segoe UI,Microsoft YaHei UI,Microsoft YaHei,Arial,sans-serif" font-size="36" font-weight="600" fill="${dark ? '#ffffff' : '#222222'}">小角</text></svg>`);
       const image = await sharp(artwork).removeAlpha().raw().toBuffer();
       const name = `brand${dark ? '-dark' : ''}${scale === 2 ? '-2x' : ''}.bmp`;
       await writeFile(join(output, name), bitmap24(image, width, height));

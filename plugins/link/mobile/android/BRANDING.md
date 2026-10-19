@@ -1,10 +1,10 @@
 # Android 品牌资源
 
-应用名称为“小角”，DSH-Plus 为插件名称。品牌采用新版小角 IP v2.1，正式素材来自根目录 `assets/brand/dsh-plus-logo.svg` 与 `dsh-plus-mark.svg`，保留暖米白身体、砖红切角、深墨豆形眼与浅米背景。
+应用名称为“小角”，DSH-Plus 为插件名称。品牌采用新版小角 IP v2.1，应用图标采用用户确认的 `03-社交头像/SVG/routergo-avatar.svg` 黑底圆角版本，运行与构建统一引用根目录 `assets/brand/dsh-plus-logo.svg`；保留暖米白身体、砖红切角、深墨豆形眼，背景为墨黑 `#222222`。透明主标识仍来自 `assets/brand/dsh-plus-mark.svg`。
 
-- `ic_dsh_plus.xml`：来自正式应用图标的浅米底方形图标与 Android 8–11 启动图。
+- `ic_dsh_plus.xml`：来自正式社交头像的黑底圆角图标与 Android 8–11 启动图。
 - `ic_dsh_plus_foreground.xml`：Adaptive Icon 与 Android 12+ 启动图，共用无底色的小角矢量，放在 108dp 画布中央的 56 × 37.33dp 区域。角色外轮廓处于 66dp 安全圆内，兼容圆形、圆角与方圆遮罩。
-- `mipmap-anydpi-v26/ic_dsh_plus.xml`：浅米背景 `#EDE4D3` 的自适应图标，同时用于普通和圆形启动器入口。Android 12+ 启动页与系统栏使用同一背景。
+- `mipmap-anydpi-v26/ic_dsh_plus.xml`：墨黑背景 `#222222` 的自适应图标，同时用于普通和圆形启动器入口。启动页与系统栏使用同一深色背景，启动主题使用浅色状态栏/导航栏图标；扫码页的浅色主题与正常 Activity 运行时主题保持原有行为。
 
 包名及 Link 配对行为保持不变。修改公共主标识时同步这些 Android VectorDrawable 路径与品牌色。
 
