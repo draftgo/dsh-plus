@@ -39,7 +39,17 @@ const installerSources = join(root, '.local/desktop/installer');
 await prepareInstallerSources(root, installerSources);
 const include = (await readFile(join(desktop, 'scripts/installer.nsh'), 'utf8')).replaceAll('\r\n', '\n').replaceAll('${__FILEDIR__}', join(desktop, 'scripts')).replace('!define INSTALLER_SOURCE_DIR', '!define /ifndef INSTALLER_SOURCE_DIR');
 if (include.split('!macro customInstall\n').length !== 2) throw new Error('Official installer changed: customInstall hook must be reviewed');
+if (include.split('!macro customInit\n').length !== 2) throw new Error('Official installer changed: customInit hook must be reviewed');
 const bootstrap = `
+Var dshPreviousInstallLocation
+Var dshPreviousShortcutName
+
+!macro customInit
+  ReadRegStr $dshPreviousInstallLocation HKCU "\${INSTALL_REGISTRY_KEY}" "InstallLocation"
+  ReadRegStr $dshPreviousShortcutName HKCU "\${INSTALL_REGISTRY_KEY}" "ShortcutName"
+  !insertmacro dshOfficialCustomInit
+!macroend
+
 !macro customInstall
   !insertmacro dshOfficialCustomInstall
   Push $R0
@@ -58,6 +68,12 @@ const bootstrap = `
     SetErrorLevel 2
     Quit
   \${EndIf}
+  ; Only remove the old brand's links when upgrading its registered installation.
+  \${If} $dshPreviousInstallLocation == $INSTDIR
+  \${AndIf} $dshPreviousShortcutName == "DSH-Plus"
+    Delete "$SMPROGRAMS\\DSH-Plus.lnk"
+    Delete "$DESKTOP\\DSH-Plus.lnk"
+  \${EndIf}
   Pop $1
   Pop $0
   Pop $R2
@@ -67,6 +83,6 @@ const bootstrap = `
 `;
 await mkdir(join(root, '.local/desktop'), { recursive: true });
 // Includes in the official text are relative to its original directory.
-await writeFile(join(root, '.local/desktop/installer-plus.nsh'), `!addincludedir "${join(desktop, 'scripts')}"\n!define INSTALLER_SOURCE_DIR "${installerSources}"\n!define INSTALLER_BUILD_DIR "${join(root, '.local/desktop/brand')}"\n!define INSTALLER_STRINGS_FILE "${join(root, '.local/desktop/brand/strings-plus.nsh')}"\n${include.replace('!macro customInstall\n', '!macro dshOfficialCustomInstall\n')}${bootstrap}`);
+await writeFile(join(root, '.local/desktop/installer-plus.nsh'), `!addincludedir "${join(desktop, 'scripts')}"\n!define INSTALLER_SOURCE_DIR "${installerSources}"\n!define INSTALLER_BUILD_DIR "${join(root, '.local/desktop/brand')}"\n!define INSTALLER_STRINGS_FILE "${join(root, '.local/desktop/brand/strings-plus.nsh')}"\n${include.replace('!macro customInit\n', '!macro dshOfficialCustomInit\n').replace('!macro customInstall\n', '!macro dshOfficialCustomInstall\n')}${bootstrap}`);
 await pm(['exec', 'electron-builder', '--config', join(root, 'scripts/desktop/electron-builder.config.mjs'), '--win', '--x64', '--publish', 'never'], desktop);
 await pm(['exec', 'tsx', join(root, 'scripts/desktop/smoke-windows.mjs')], desktop);

@@ -146,6 +146,8 @@ try {
         if (Test-Path $legacy.FullName) { throw 'The previous DSH-Plus.exe was left behind' }
         if ((Get-Content $profileMarker) -ne 'keep profile' -or (Get-Content $dataMarker) -ne 'keep desktop data') { throw 'Upgrade did not preserve user data' }
         if (Test-Path (Join-Path $env:APPDATA 'Microsoft/Windows/Start Menu/Programs/DSH-Plus.lnk')) { throw 'The legacy Start Menu shortcut was left behind' }
+        $desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
+        if (Test-Path (Join-Path $desktop 'DSH-Plus.lnk')) { throw 'The legacy Desktop shortcut was left behind' }
         Write-Output "DSH-Plus to 小角 upgrade passed: $($upgraded.FullName)"
     }
 } finally {
