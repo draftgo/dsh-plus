@@ -37,8 +37,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Install plugin and server seed dependencies
+      - name: Prepare official package manager
         run: |
+          npm install --global --force corepack@0.34.0
+          corepack enable
+      - name: Install official, plugin and server seed dependencies
+        run: |
+          npm run setup
           npm ci --prefix plugins/link
           npm ci --prefix plugins/commander
       - name: Build and verify signed Android release
