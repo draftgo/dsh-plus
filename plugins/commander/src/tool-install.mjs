@@ -6,6 +6,7 @@ import { constants } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, resolve, relative, isAbsolute } from 'node:path';
 import { TOOL_CATALOG, getTool, normalizeToolId } from './tool-catalog.mjs';
+import { NodeRuntime } from './node-runtime.mjs';
 const finished = new Set(['succeeded', 'failed', 'cancelled']);
 const clone = value => JSON.parse(JSON.stringify(value));
 export function redactToolOutput(value, env = process.env) {
@@ -30,8 +31,9 @@ export function executeToolCommand(command, args, { env, cwd, signal, onOutput }
   });
 }
 export class ToolInstaller extends EventEmitter {
-  constructor({ root = join(homedir(), '.dowork', 'tools'), platform = process.platform, env = process.env, executor = executeToolCommand, isRunning = () => false, maxConcurrent = 2, timeoutMs = 15 * 60_000 } = {}) {
+  constructor({ root = join(homedir(), '.dowork', 'tools'), platform = process.platform, arch = process.arch, env = process.env, executor = executeToolCommand, runtime, isRunning = () => false, maxConcurrent = 2, timeoutMs = 15 * 60_000 } = {}) {
     super(); this.root = resolve(root); this.platform = platform; this.env = { ...env }; this.executor = executor; this.isRunning = isRunning;
+    this.runtime = runtime ?? new NodeRuntime({ root: join(this.root, '.runtime'), platform, arch, env: this.env, executor });
     this.maxConcurrent = Math.max(1, Math.min(4, Math.floor(maxConcurrent) || 2)); this.timeoutMs = Math.max(1, timeoutMs);
     this.records = new Map(); this.controllers = new Map(); this.active = 0; this.pending = []; this.closed = false; this.tasks = new Set();
   }
@@ -59,11 +61,16 @@ export class ToolInstaller extends EventEmitter {
   async resolveLaunch(id, { managed = false } = {}) {
     if (!managed && [...this.records.values()].some(job => job.toolId === normalizeToolId(id) && (!finished.has(job.status) || this.controllers.has(job.id)))) throw new Error('工具正在安装、更新或卸载，请等待任务结束后启动会话。');
     const command = managed ? this.managedExecutable(id) : await this.resolveExecutable(id); if (!command) return null;
-    if (this.platform !== 'win32' || !/\.(cmd|bat)$/i.test(command)) return { command, args: [] };
-    const tool = getTool(id), packageDir = join(command === this.managedExecutable(id) ? this.prefix(id) : dirname(command), 'node_modules', tool.packageName ?? '');
+    const isManaged = command === this.managedExecutable(id), tool = getTool(id);
+    const node = tool.installer === 'npm' && (isManaged || this.platform === 'win32') ? await this.runtime.resolveNode() : null;
+    if (isManaged && tool.installer === 'npm' && !node) throw new Error('工具的 Node.js 环境不可用，请点击更新或重装自动修复。');
+    const env = isManaged && node ? this.runtimeEnvironment(node, this.env) : null;
+    if (this.platform !== 'win32' || !/\.(cmd|bat)$/i.test(command)) return { command, args: [], ...(env ? { env } : {}) };
+    if (!node) throw new Error('找不到可用的 Node.js，请先安装独立副本自动准备运行环境。');
+    const packageDir = join(isManaged ? this.prefix(id) : dirname(command), 'node_modules', tool.packageName ?? '');
     try {
       const pkg = JSON.parse(await readFile(join(packageDir, 'package.json'), 'utf8')); const bin = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin?.[tool.command];
-      if (bin) { const path = resolve(packageDir, bin); if (path.startsWith(packageDir + '/') || path.startsWith(packageDir + '\\')) { await access(path); return { command: process.execPath, args: [path] }; } }
+      if (bin) { const path = resolve(packageDir, bin); if (path.startsWith(packageDir + '/') || path.startsWith(packageDir + '\\')) { await access(path); return { command: node, args: [path], ...(env ? { env } : {}) }; } }
     } catch {}
     throw new Error('Windows 命令需要原生可执行文件或可解析的 npm JS 启动入口。');
   }
@@ -74,16 +81,16 @@ export class ToolInstaller extends EventEmitter {
       const value = JSON.parse(await readFile(file, 'utf8')); return value.toolId === normalizeToolId(id) && value.owner === 'dsh-plus' ? value : null;
     } catch { return null; }
   }
-  async npmCommand() {
-    if (this.platform !== 'win32') { const command = await this.findExecutable('npm'); if (!command) throw new Error('需要可用的 Node.js 与 npm。'); return { command, args: [] }; }
-    for (const path of [this.env.npm_execpath, join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')].filter(Boolean)) { try { await access(path); return { command: process.execPath, args: [path] }; } catch {} }
-    throw new Error('Windows 需要可用的 npm-cli.js；请安装包含 npm 的 Node.js。');
+  runtimeEnvironment(node, env) {
+    const path = String(env.PATH ?? env.Path ?? ''), separator = this.platform === 'win32' ? ';' : delimiter;
+    // Windows treats environment names case-insensitively; publish only one PATH.
+    return { PATH: [dirname(node), path].filter(Boolean).join(separator) };
   }
   async support(tool) {
     if (!tool.platforms.includes(this.platform)) return { supported: false, reason: tool.name + ' 暂不支持此平台的一键安装 (' + this.platform + ')。' };
     if (!tool.installer) return { supported: false, reason: tool.installReason };
     if (tool.installer === 'uv' && !(await this.findExecutable('uv'))) return { supported: false, reason: 'Hermes 隔离安装需要 uv；请先安装 uv。' };
-    if (tool.installer === 'npm') try { await this.npmCommand(); } catch (error) { return { supported: false, reason: error.message }; }
+    if (tool.installer === 'npm' && !this.runtime.supported()) return { supported: false, reason: '当前平台或架构暂不支持自动准备 Node.js 环境。' };
     return { supported: true, reason: null };
   }
   async list() {
@@ -94,7 +101,7 @@ export class ToolInstaller extends EventEmitter {
       const job = [...this.records.values()].find(value => value.toolId === tool.id && (!finished.has(value.status) || this.controllers.has(value.id)));
       const locked = running ? '工具正在运行，请先结束会话。' : job ? '工具已有进行中的安装任务。' : null;
       const managedReason = locked ?? (!receipt ? '仅支持管理 DSH-Plus 安装的独立副本；系统安装与账户配置保持原样。' : support.reason);
-      return { ...tool, source: systemExecutable ? 'external' : managedInstalled ? 'managed' : 'none', installed: !!executable, executable, version: !systemExecutable && managedInstalled ? receipt.version ?? null : null,
+      return { ...tool, runtimeNotice: tool.installer === 'npm' ? '缺少 Node.js 或 npm 时将自动安装，默认使用国内加速。' : null, source: systemExecutable ? 'external' : managedInstalled ? 'managed' : 'none', installed: !!executable, executable, version: !systemExecutable && managedInstalled ? receipt.version ?? null : null,
         systemExecutable, managedExecutable: managedPath, managedInstalled, managedVersion: receipt?.version ?? null,
         canInstall: support.supported && !locked && !receipt, installReason: locked ?? (receipt ? '独立副本已安装，可更新或重新安装。' : support.reason),
         canUpdate: support.supported && !!receipt && !locked, updateReason: managedReason,
@@ -102,15 +109,16 @@ export class ToolInstaller extends EventEmitter {
         canUninstall: !!receipt && !locked, uninstallReason: locked ?? (!receipt ? '仅支持卸载 DSH-Plus 安装的独立副本；系统安装与账户配置保持原样。' : null), ...(job ? { job: clone(job) } : {}) };
     }));
   }
-  install(id) { return this.enqueue(id, 'install'); }
-  updateTool(id) { return this.enqueue(id, 'update'); }
-  reinstall(id) { return this.enqueue(id, 'reinstall'); }
+  install(id, options) { return this.enqueue(id, 'install', options); }
+  updateTool(id, options) { return this.enqueue(id, 'update', options); }
+  reinstall(id, options) { return this.enqueue(id, 'reinstall', options); }
   uninstall(id) { return this.enqueue(id, 'uninstall'); }
-  enqueue(id, action) {
+  enqueue(id, action, { source = 'mirror' } = {}) {
     if (this.closed) throw new Error('Installer is shutting down'); id = normalizeToolId(id);
+    if (!['mirror', 'official'].includes(source)) throw new Error('无效下载源。');
     if ([...this.records.values()].some(job => job.toolId === id && (!finished.has(job.status) || this.controllers.has(job.id)))) throw new Error('工具已有进行中的安装任务。');
     if (this.records.size >= 100) { const stale = [...this.records.values()].find(job => finished.has(job.status) && !this.controllers.has(job.id)); if (stale) this.records.delete(stale.id); else throw new Error('安装队列已满。'); }
-    const job = { id: randomUUID(), toolId: id, action, status: 'queued', message: '等待执行', logs: [], error: null, createdAt: new Date().toISOString(), startedAt: null, finishedAt: null };
+    const job = { id: randomUUID(), toolId: id, action, source, status: 'queued', message: '等待执行', logs: [], error: null, createdAt: new Date().toISOString(), startedAt: null, finishedAt: null };
     this.records.set(job.id, job); this.pending.push(job.id); this.emit('job', clone(job)); queueMicrotask(() => this.drain()); return clone(job);
   }
   jobs() { return [...this.records.values()].map(clone); }
@@ -161,13 +169,21 @@ export class ToolInstaller extends EventEmitter {
         const installHome = join(prefix, '.install-home'); await mkdir(installHome, { recursive: true, mode: 0o700 });
         installEnv = { ...installEnv, HOME: installHome, USERPROFILE: installHome, XDG_CONFIG_HOME: join(installHome, 'config'), XDG_DATA_HOME: join(installHome, 'data'), XDG_CACHE_HOME: join(installHome, 'cache'), APPDATA: join(installHome, 'AppData', 'Roaming'), LOCALAPPDATA: join(installHome, 'AppData', 'Local') };
         if (tool.installer === 'npm') {
-          const npm = await this.npmCommand(); await execute(npm.command, [...npm.args, 'install', '--global', '--prefix', prefix, '--include=optional', '--engine-strict', '--no-audit', '--no-fund', ...tool.installArgs, tool.packageName + '@latest']);
+          this.update(job, { message: '正在检查 Node.js 与 npm 环境' });
+          const npm = await this.runtime.ensure({ source: job.source, signal: controller.signal, env: installEnv, onMessage: message => this.update(job, { message }), onOutput: log });
+          const registry = job.source === 'official' ? 'https://registry.npmjs.org' : 'https://registry.npmmirror.com';
+          installEnv = { ...Object.fromEntries(Object.entries(installEnv).filter(([key]) => !/^npm_config_/i.test(key) && !/^(?:path|ELECTRON_RUN_AS_NODE|NODE_OPTIONS|NODE_PATH)$/i.test(key))), ...this.runtimeEnvironment(npm.command, installEnv), npm_config_registry: registry, npm_config_userconfig: join(installHome, '.npmrc'), npm_config_cache: join(installHome, 'npm-cache') };
+          this.update(job, { message: '环境就绪，正在' + labels[job.action] + ' ' + tool.name });
+          await execute(npm.command, [...npm.args, 'install', '--global', '--prefix', prefix, '--registry', registry, '--include=optional', '--engine-strict', '--no-audit', '--no-fund', ...tool.installArgs, tool.packageName + '@latest']);
         } else {
           await execute(await this.findExecutable('uv'), ['tool', 'install', '--force', ...(job.action === 'update' ? ['--upgrade'] : []), '--python', '3.14', tool.source], { ...installEnv, UV_TOOL_DIR: join(prefix, 'tools'), UV_TOOL_BIN_DIR: join(prefix, 'bin'), UV_PYTHON_INSTALL_DIR: join(prefix, 'python'), UV_NO_CONFIG: '1' });
         }
         if (controller.signal.aborted) throw new Error('已取消');
         const executable = this.managedExecutable(tool.id); if (!(await this.usable(executable))) throw new Error('安装命令已结束，但工具入口不可用。');
-        const launch = await this.resolveLaunch(tool.id, { managed: true }); const result = await execute(launch.command, [...launch.args, '--version']); const version = redactToolOutput(result?.stdout ?? '', this.env).trim().slice(0, 200);
+        this.update(job, { message: '正在验证 ' + tool.name });
+        const launch = await this.resolveLaunch(tool.id, { managed: true }); const result = await execute(launch.command, [...launch.args, '--version'], { ...installEnv, ...launch.env });
+        const versionLines = redactToolOutput(result?.stdout ?? '', this.env).trim().split(/[\r\n]+/).filter(Boolean);
+        const version = (versionLines.findLast(line => !/^\s*(?:warning|error|note)\b/i.test(line) && /\b\d+\.\d+\.\d+\b/.test(line)) ?? versionLines.at(-1) ?? '').slice(0, 200);
         await writeFile(join(prefix, 'dsh-install.json'), JSON.stringify({ owner: 'dsh-plus', toolId: tool.id, version: version || null, installedAt: new Date().toISOString() }), { mode: 0o600 });
       }
       if (!controller.signal.aborted) this.update(job, { status: 'succeeded', message: labels[job.action] + '完成，系统安装与用户配置已保留', finishedAt: new Date().toISOString() });

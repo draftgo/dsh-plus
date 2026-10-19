@@ -1,0 +1,371 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "DSH-Plus Harness 工具管理",
+    "version": "1.1.0",
+    "description": "官方 owner 通道的工具设置接口。仅本机 owner 可管理；Link 远程会话不可调用。不通过 MCP 向 Agent 暴露安装或配置写入权限。"
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "paths": {
+    "/api/commander/tooling": {
+      "post": {
+        "summary": "管理工具、隔离会话方案与安装任务",
+        "description": "请求必须通过官方 owner 通道且 Origin 同源。安装、更新、重装的 source 可省略，默认 mirror；npm 工具自动准备缺少的兼容 Node.js/npm。卸载只移除带 DSH-Plus 凭据的独立副本；本机配置写入需 confirmNativeWrite=true。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "操作结果；安装操作立即返回异步 job，后续使用 job/cancel 查询或取消。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入无效或操作失败；未知 source 拒绝，不静默回退。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "非同源请求或未获 owner 授权。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "方案冲突、缺少显式本机写入确认或工具仍在运行。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求超过 300 KiB。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Content-Type 不是 application/json。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "DownloadSource": {
+        "type": "string",
+        "enum": [
+          "mirror",
+          "official"
+        ],
+        "default": "mirror",
+        "description": "mirror 默认国内加速；official 官方直连。仅作用于本次环境准备与安装，不写入用户 npm 配置。"
+      },
+      "ToolingRequest": {
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "pickerCatalog",
+              "catalog",
+              "profiles",
+              "providers",
+              "models",
+              "job",
+              "install",
+              "update",
+              "reinstall",
+              "uninstall",
+              "cancel",
+              "setDefault",
+              "saveProfile",
+              "setBindings",
+              "preview",
+              "apply",
+              "restore"
+            ]
+          },
+          "tool": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "description": "安装任务 ID（job/cancel）"
+          },
+          "providerId": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "quickSettings": {
+            "type": "object"
+          },
+          "overrides": {
+            "type": "object"
+          },
+          "contextWindow": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "expectedRevision": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confirmNativeWrite": {
+            "type": "boolean"
+          },
+          "checksums": {
+            "type": "object",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "backupId": {
+            "type": "string"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "enum": [
+                    "install",
+                    "update",
+                    "reinstall"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "tool"
+              ],
+              "properties": {
+                "source": {
+                  "$ref": "#/components/schemas/DownloadSource"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "enum": [
+                    "uninstall",
+                    "setDefault",
+                    "saveProfile",
+                    "preview",
+                    "apply"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "tool"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "enum": [
+                    "job",
+                    "cancel"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "id"
+              ]
+            }
+          }
+        ]
+      },
+      "ToolSummary": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "installer": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runtimeNotice": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "环境复用或自动准备提示。缺少 Node.js/npm 不会使受支持的 npm 工具不可安装。"
+          },
+          "canInstall": {
+            "type": "boolean"
+          },
+          "canUpdate": {
+            "type": "boolean"
+          },
+          "canReinstall": {
+            "type": "boolean"
+          },
+          "canUninstall": {
+            "type": "boolean"
+          },
+          "job": {
+            "$ref": "#/components/schemas/InstallJob"
+          }
+        }
+      },
+      "InstallJob": {
+        "type": "object",
+        "required": [
+          "id",
+          "toolId",
+          "action",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "toolId": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "install",
+              "update",
+              "reinstall",
+              "uninstall"
+            ]
+          },
+          "source": {
+            "$ref": "#/components/schemas/DownloadSource"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "当前阶段，如环境准备、工具安装或版本验证。"
+          },
+          "logs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ToolingResponse": {
+        "type": "object",
+        "properties": {
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolSummary"
+            }
+          },
+          "job": {
+            "$ref": "#/components/schemas/InstallJob"
+          }
+        },
+        "description": "按 action 返回：catalog 含 tools/profiles/defaults/capabilities/backups/bindings/providerAccess；pickerCatalog 返回模型选择目录；profiles 返回方案目录；providers/models 返回对应列表；install/update/reinstall/uninstall/job/cancel 返回 job；saveProfile 返回 profile；preview 返回 preview；apply/restore 返回 result；setDefault/setBindings 返回方案管理结果。保留既有响应字段。"
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

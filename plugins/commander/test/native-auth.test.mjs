@@ -24,3 +24,16 @@ test('API or ambiguous login output never claims subscription and command errors
   output = 'unexpected output'; assert.equal((await auth.status('codex')).status, 'unknown');
   output = ''; assert.deepEqual(await auth.status('codex'), { tool: 'codex', status: 'logged-out' });
 });
+
+test('managed runtime PATH reaches login detection while preserving the account home', async () => {
+  const auth = createNativeAuth({
+    installer: { resolveLaunch: async () => ({ command: '/managed/codex', args: [], env: { PATH: '/managed/node:/system/bin' } }) },
+    env: { HOME: '/existing/account', PATH: '/system/bin' },
+    executor: async (_, __, options) => {
+      assert.equal(options.env.HOME, '/existing/account');
+      assert.equal(options.env.PATH, '/managed/node:/system/bin');
+      return { stdout: 'Logged in using ChatGPT' };
+    },
+  });
+  assert.equal((await auth.status('codex')).status, 'subscription');
+});

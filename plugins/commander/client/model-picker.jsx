@@ -148,6 +148,7 @@ function ModelPicker({ locked, available, useDirectory, load, select, binding, o
   const activeEffort = currentModel && selectionReasoningEffort(currentGroup.id, currentModel, state.current);
   const effortName = currentModel?.reasoning?.efforts?.find(effort => effort.id === activeEffort)?.name;
   const failures = state.failures?.filter(group => tool === 'deepseek' ? !group.id?.startsWith('commander-') : group.id === 'commander-' + tool) || [];
+  const modelLabel = currentModel?.name ?? state.current?.model ?? '选择模型';
   const message = error || catalogError || state.error || failures.map(group => group.message).join('；');
   const onMenuKey = event => {
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
@@ -157,7 +158,7 @@ function ModelPicker({ locked, available, useDirectory, load, select, binding, o
   };
   return <>
       <button ref={trigger} type="button" className="cmd-model-trigger" disabled={modelLocked || !available || busy} title={bindingHint || undefined} aria-label={'选择工具与模型，当前 ' + (entries.find(item => item.id === currentTool)?.name ?? currentTool) + ' ' + (currentModel?.name ?? state.current?.model ?? '') + (sessionBinding?.bound ? '。可在当前工具和供应商内切换模型' : bindingHint ? '。' + bindingHint : '')} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined} onClick={() => { if (open) close(); else { setTool(currentTool); setProvider(null); setQuery(''); setToolsOpen(false); setOpen(true); refresh(); } }}>
-      <span className="cmd-model-caption">{currentModel?.name ?? state.current?.model ?? '选择模型'}{effortName ? ' · ' + effortName : ''}</span><UIIcon name="chevronDown" size={14} />
+      <span className="cmd-model-caption" title={modelLabel + (effortName ? ' · ' + effortName : '')}>{modelLabel}{effortName ? ' · ' + effortName : ''}</span><UIIcon name="chevronDown" size={14} />
     </button>
     {open && position && createPortal(<div ref={menu} id={id} role="dialog" aria-label="工具与模型" className="cmd-model-popup" style={position} onKeyDown={onMenuKey}>
       <header className="cmd-model-header">

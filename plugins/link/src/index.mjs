@@ -5,6 +5,7 @@ import { loadIdentity } from './transport/tls.mjs';
 import { listen, connectionAddresses, authority, validateConfig } from './transport/server.mjs';
 import { createSessionAdapter } from './session/adapter.mjs';
 import { createNativeAdapter } from './session/native.mjs';
+import { createDeviceCenter } from './devices/center.mjs';
 import { createWorkbench } from './transport/workbench.mjs';
 
 /** Owner admin uses Harness Connection; remote devices get a distinct TLS carrier. */
@@ -69,7 +70,22 @@ export async function mountLink(ctx, config = {}) {
     if (action === 'revoke') { const id = text(input.id, '设备 ID'); await store.revoke(id); await Promise.all([sessions.revoke(id), workbench?.revoke(id)]); return status(); }
     throw new Error('不支持的管理操作');
   };
+  let deviceCenter;
+  ctx.effect(() => ctx.connection.fetch.register({
+    path: '/api/commander-devices', methods: ['POST'], requestBody: 'buffered',
+    async fetch(request) {
+      try {
+        const input = await request.json();
+        if (input.action !== 'launch') throw new Error('不支持的设备操作');
+        const requestedParent = input.parentOrigin;
+        const parent = requestedParent === 'dsh-app://app' || requestedParent === 'dsh-app://localhost' ? requestedParent : new URL(request.url).origin;
+        deviceCenter ??= createDeviceCenter({ directory: join(directory, 'outgoing'), webRoot }).catch(error => { deviceCenter = undefined; throw error; });
+        return Response.json((await deviceCenter).launch(parent), { headers: { 'cache-control': 'no-store' } });
+      } catch (error) { return Response.json({ error: error.message }, { status: 400, headers: { 'cache-control': 'no-store' } }); }
+    },
+  }));
   const close = async () => {
+    await (await deviceCenter?.catch(() => undefined))?.close();
     closed = true; await changes; await listener?.close(); listener = undefined; await sessions.close(); store.clearPairings(); await store.flush();
   };
   try { if (store.state.enabled) await start(); } catch (e) { error = e.message; }

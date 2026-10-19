@@ -80,15 +80,22 @@ export function MobileWorkbench({ ctx }) {
       if (event.shiftKey && (document.activeElement === first || !drawer.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
       else if (!event.shiftKey && (document.activeElement === last || !drawer.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
     };
+    let closeFrame;
+    const closeAfterNavigation = () => {
+      if (closeFrame !== undefined) cancelAnimationFrame(closeFrame);
+      // Native listeners below React's root run before delegated onClick.
+      // A microtask can unmount a tapped label before React receives it.
+      closeFrame = requestAnimationFrame(() => { closeFrame = undefined; close(); });
+    };
     const onNavigate = event => {
       const target = event.target.closest?.('button, a');
       if (!target) return;
-      if (target.matches('.cmd-settings')) requestAnimationFrame(close);
-      else if (target.matches('.cmd-session, .cmd-new-chat, .cmd-project-new, [class*="newSession"]') || target.closest('[class*="panelList"]')) queueMicrotask(close);
+      if (target.matches('.cmd-settings, .cmd-session, .cmd-new-chat, .cmd-project-new, [class*="newSession"]') || target.closest('[class*="panelList"]')) closeAfterNavigation();
     };
     document.addEventListener('keydown', onKey, true);
     drawer.addEventListener('click', onNavigate);
     return () => {
+      if (closeFrame !== undefined) cancelAnimationFrame(closeFrame);
       const restoreFocus = drawer.contains(document.activeElement);
       document.removeEventListener('keydown', onKey, true);
       drawer.removeEventListener('click', onNavigate);

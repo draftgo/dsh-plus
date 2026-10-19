@@ -17,8 +17,8 @@ const rendererRequire = createRequire(new URL('../../../deepseek-harness/package
 const { JSDOM } = createRequire(new URL('../../../deepseek-harness/package.json', import.meta.url))('jsdom');
 const source = readFileSync(new URL('../client/tool-settings.jsx', import.meta.url), 'utf8');
 
-function mount(component, initialProps) {
-  const dom = new JSDOM('<!doctype html><div id="root"></div><button id="outside">outside</button>', { pretendToBeVisual: true });
+function mount(component, initialProps, options = {}) {
+  const dom = new JSDOM('<!doctype html><div id="root"></div><button id="outside">outside</button>', { pretendToBeVisual: true, url: 'http://test/' });
   const globals = { window: dom.window, document: dom.window.document, Node: dom.window.Node, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement, requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window), cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window), IS_REACT_ACT_ENVIRONMENT: true };
   const previous = new Map();
   for (const [key, value] of Object.entries(globals)) {
@@ -43,9 +43,9 @@ function mount(component, initialProps) {
   }
   const module = { exports: {} };
   const code = transformSync(source + '\nexport { Select, ToolTabs };', { loader: 'jsx', format: 'cjs' }).code;
-  runInNewContext(code, { ...globals, module, exports: module.exports, require(id) {
+  runInNewContext(code, { ...globals, module, exports: module.exports, URL, AbortController, fetch: options.fetch || globalThis.fetch, setTimeout, clearTimeout, require(id) {
     if (id === 'react') return React;
-    if (id === '@deepseek-ai/dsh-client-ui-primitives') return { ...upstream(primitives), Modal: Stub, Tooltip: ({ children }) => children };
+    if (id === '@deepseek-ai/dsh-client-ui-primitives') return { ...upstream(primitives), Modal: ({ open, children, footer }) => open ? React.createElement('div', { role: 'dialog' }, children, footer) : null, Tooltip: ({ children }) => children };
     if (id === './tool-settings-state.mjs') return state;
     if (id === '../shared/tool-quick-settings.mjs') return quickSettings;
     if (id === './tab-drag-scroll.mjs') return { createTabDragScroll };
@@ -59,6 +59,7 @@ function mount(component, initialProps) {
   render(initialProps);
   return {
     document: dom.window.document, render,
+    async flush() { await React.act(async () => { await Promise.resolve(); await Promise.resolve(); }); },
     event(target, type, fields = {}) {
       const event = new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, ...fields });
       for (const key of ['pointerId', 'pointerType']) if (key in fields) Object.defineProperty(event, key, { value: fields[key] });
@@ -155,4 +156,60 @@ test('top tabs scroll on a left drag without changing tabs, while clicks still w
     view.event(button, 'click', { detail: 0 });
     assert.equal(changes.at(-1), 'codex');
   } finally { view.close(); }
+});
+
+for (const action of ['install', 'update', 'reinstall']) for (const source of ['mirror', 'official']) test('npm ' + action + ' uses ' + source + ' and locks it while running', async () => {
+  const calls = [], managed = action !== 'install';
+  const catalog = { tools: [{ id: 'codex', name: 'Codex', installer: 'npm', installed: managed, managedInstalled: managed, source: managed ? 'managed' : 'none', canInstall: !managed, canUpdate: managed, canReinstall: managed, canUninstall: managed, runtimeNotice: '将自动准备 Node.js 与 npm' }], profiles: [], capabilities: [] };
+  const fetch = async (_url, options) => {
+    const input = JSON.parse(options.body); calls.push(input);
+    const body = input.action === 'catalog' ? catalog : input.action === 'providers' ? { providers: [] } : { job: { id: 'job', toolId: 'codex', action, source: input.source, status: 'running', message: '正在准备 Node.js 环境' } };
+    return { ok: true, json: async () => body };
+  };
+  const view = mount('ToolSettingsSection', {}, { fetch });
+  try {
+    await view.flush();
+    const radios = [...view.document.querySelectorAll('[role=radio]')];
+    assert.equal(radios.length, 2);
+    assert.equal(radios[0].textContent, '国内加速');
+    assert.equal(radios[0].getAttribute('aria-checked'), 'true');
+    assert.match(view.document.body.textContent, /将自动准备 Node.js 与 npm/);
+    const buttons = () => [...view.document.querySelectorAll('button')];
+    const installButton = buttons().find(button => button.textContent === ({ install: '安装', update: '更新副本', reinstall: '重装' })[action]);
+    assert.equal(installButton.disabled, false, 'missing Node.js must not disable installation');
+    assert.equal(radios[0].tabIndex, 0);
+    assert.equal(radios[1].tabIndex, -1);
+    React.act(() => radios[0].dispatchEvent(new view.document.defaultView.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
+    assert.equal(radios[1].getAttribute('aria-checked'), 'true');
+    assert.equal(view.document.activeElement, radios[1]);
+    React.act(() => radios[1].dispatchEvent(new view.document.defaultView.KeyboardEvent('keydown', { key: 'Home', bubbles: true })));
+    assert.equal(radios[0].getAttribute('aria-checked'), 'true');
+    if (source === 'official') view.click(radios[1]);
+    view.click(installButton);
+    if (action === 'reinstall') view.click(buttons().find(button => button.textContent === '确认'));
+    await view.flush();
+    assert.deepEqual(calls.find(input => input.action === action), { action, tool: 'codex', source });
+    assert(radios.every(button => button.disabled));
+    assert.match(view.document.body.textContent, /正在准备 Node.js 环境/);
+  } finally { view.close(); }
+});
+
+test('running installation restores its selected source and non-npm tools omit the download selector', async () => {
+  for (const installer of ['npm', 'uv']) {
+    const fetch = async (_url, options) => {
+      const { action } = JSON.parse(options.body);
+      const body = action === 'providers' ? { providers: [] } : { tools: [{ id: 'codex', name: 'Codex', installer, canInstall: true, job: { id: 'running', toolId: 'codex', source: 'official', status: 'running', message: '安装中' } }], profiles: [] };
+      return { ok: true, json: async () => body };
+    };
+    const view = mount('ToolSettingsSection', {}, { fetch });
+    try {
+      await view.flush();
+      const radios = [...view.document.querySelectorAll('[role=radio]')];
+      assert.equal(radios.length, installer === 'npm' ? 2 : 0);
+      if (installer === 'npm') {
+        assert.equal(radios[1].getAttribute('aria-checked'), 'true');
+        assert(radios.every(button => button.disabled));
+      }
+    } finally { view.close(); }
+  }
 });

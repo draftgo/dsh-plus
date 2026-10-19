@@ -10,7 +10,7 @@ import { getInstallState } from '../../plugins/commander/shared/plugin-install.m
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const app = join(root, 'artifacts/windows/win-unpacked');
 const resources = join(app, 'resources');
-const executable = join(app, 'DSH-Plus.exe');
+const executable = join(app, '小角.exe');
 const descriptor = JSON.parse(await readFile(join(root, 'deepseek-harness/apps/desktop/.desktop-build/targets/win-x64/dsh/desktop-runtime.json')));
 await smokePreparedRuntime(join(resources, 'app.asar', 'dsh'), executable, join(resources, 'runtime'), descriptor);
 const temporary = await mkdtemp(join(tmpdir(), 'dsh-plus-installed-'));

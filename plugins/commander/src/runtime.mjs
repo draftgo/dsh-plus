@@ -67,7 +67,7 @@ export class Commander extends EventEmitter {
     return { ...base, ...(installed && !base.command ? { command: name === 'claude' && installed.args.length ? installed.args[0] : installed.command, commandArgs: name === 'claude' ? [] : installed.args } : {}),
       ...(ACP_TOOL_DEFAULTS[name] ? { args: base.args ?? installed?.args ?? base.commandArgs ?? [] } : {}),
       ...launch, commandArgs: [...(base.commandArgs ?? (name === 'claude' ? [] : installed?.args) ?? []), ...(launch.commandArgs ?? [])],
-      env: { ...base.env, ...launch.env }, ...(profile?.configured ? { managedProfile: profile } : {}) };
+      env: { ...(!base.command ? installed?.env : {}), ...base.env, ...launch.env }, ...(profile?.configured ? { managedProfile: profile } : {}) };
   }
   async doctor() {
     const run = promisify(execFile);

@@ -157,11 +157,43 @@ try {
   }
   assert.equal(afterApproval.interactions.length, 0);
   assert.ok(afterApproval.messages.some(message => message.role === 'tool' && message.text.includes('not approved')), 'denied launch produced an official tool result without launching a native CLI');
+  // Same official owner channel used by the desktop device launcher.
+  const launchResponse = await fetch(login.origin + '/api/commander-devices', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'launch', parentOrigin: login.origin }) });
+  assert.equal(launchResponse.status, 200);
+  const launch = await launchResponse.json();
+  const entry = await fetch(launch.url, { redirect: 'manual' });
+  assert.equal(entry.status, 303);
+  const centreBase = new URL(entry.headers.get('location'), launch.url);
+  const centreCall = async input => {
+    const response = await fetch(new URL('api/devices', centreBase), { method: 'POST', headers: { origin: centreBase.origin, 'content-type': 'application/json' }, body: JSON.stringify(input) });
+    const value = await response.json(); assert.equal(response.status, 200, JSON.stringify(value)); return value;
+  };
+  assert.equal((await centreCall({ action: 'list' })).devices[0].id, 'local');
+  const nextPair = await admin({ action: 'pairing', mode: 'lan' });
+  const waiting = await centreCall({ action: 'pair', uri: nextPair.uri, name: 'Second computer' });
+  assert.equal((await centreCall({ action: 'pairStatus', requestId: waiting.requestId })).status, 'pending');
+  const request = (await admin({ action: 'status' })).pending.find(value => value.name === 'Second computer');
+  await admin({ action: 'confirm', id: request.id });
+  const paired = await centreCall({ action: 'pairStatus', requestId: waiting.requestId });
+  assert.equal(paired.status, 'approved'); assert.ok(paired.device.id); assert.equal(paired.device.token, undefined);
+  const selected = await centreCall({ action: 'select', deviceId: paired.device.id });
+  const workspaceEntry = await fetch(selected.url, { redirect: 'manual' });
+  const workspaceBase = new URL(workspaceEntry.headers.get('location'), selected.url);
+  const workspacePage = await fetch(workspaceBase);
+  const html = await workspacePage.text(); assert.equal(workspacePage.status, 200); assert.ok(html.includes('/s/')); assert.ok(html.includes('/local-proxy.js'));
+  const bridge = await fetch(new URL('workbench.js', workspaceBase)); assert.equal(bridge.status, 200); assert.ok((await bridge.text()).includes('__DSH_LINK_LOCAL_PROXY__'));
+  const hostStatus = await fetch(new URL('api/commander', workspaceBase), { method: 'POST', headers: { origin: workspaceBase.origin, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'state' }) });
+  assert.equal(hostStatus.status, 200);
+  const blocked = await fetch(new URL('api/commander-devices', workspaceBase), { method: 'POST', headers: { origin: workspaceBase.origin, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'launch' }) });
+  assert.equal(blocked.status, 403);
+  await centreCall({ action: 'select', deviceId: 'local' });
+  await centreCall({ action: 'remove', deviceId: paired.device.id });
+  assert.equal((await centreCall({ action: 'list' })).devices.length, 1);
   await admin({ action: 'revoke', id: authorized.deviceId });
   await assert.rejects(rpc({ action: 'state' }), /授权/);
   await assert.rejects(updates({ action: 'status' }), /授权/);
   await admin({ action: 'configure', enabled: false });
-  console.log(JSON.stringify({ passed: ['real Harness boot', 'owner admin', 'TLS trusted CA and SPKI binding', 'pair confirm', 'remote state/models', 'paired workbench plugin update API and host preferences', 'official create idempotency', 'official history snapshot', 'mock model send and live/final assistant history', 'official approval deny and tool result', 'device revoke'], models: state.models.length, sessions: state.sessions.length }));
+  console.log(JSON.stringify({ passed: ['real Harness boot', 'owner admin', 'TLS trusted CA and SPKI binding', 'pair confirm', 'remote state/models', 'paired workbench plugin update API and host preferences', 'official create idempotency', 'official history snapshot', 'mock model send and live/final assistant history', 'official approval deny and tool result', 'device revoke', 'local centre launch and host pairing', 'isolated desktop workbench and owner API boundary'], models: state.models.length, sessions: state.sessions.length }));
 } catch (error) {
   failed = true;
   console.error(safe(error.message));

@@ -1,6 +1,6 @@
 # DSH-Plus 完整 Windows 安装包
 
-交付目标是一个 `dsh-plus-<Plus版本>-win-x64-setup.exe`：含官方 Electron Desktop、固定版本完整运行时、DSH-Plus、Voice、Link 和插件生产依赖。安装器用内置 Electron Node 初始化用户 Desktop profile，不要求用户安装 Node、CLI 或手动安装 Plus。
+交付目标是一个 `xiaojiao-<应用版本>-win-x64-setup.exe`：含官方 Electron Desktop、固定版本完整运行时、DSH-Plus、Voice、Link 和插件生产依赖。安装器用内置 Electron Node 初始化用户 Desktop profile，不要求用户安装 Node、CLI 或手动安装 Plus。
 
 ## 目录与职责
 

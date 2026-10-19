@@ -110,6 +110,18 @@ test('web collapse retains the centered narrow rail and clickable reopen control
   } finally { view.close(); }
 });
 
+test('Windows application menu keeps the same compact gap in both sidebar states', () => {
+  const view = mountSidebar({ windows: true });
+  try {
+    const selector = 'html[data-windows-titlebar]:has(.cmd-shell-sidebar .cmd-projects)';
+    for (let step = 0; step < 4; step++) {
+      assert.equal(view.document.documentElement.matches(selector), true);
+      assert.equal(view.document.defaultView.getComputedStyle(view.document.documentElement).getPropertyValue('--dsh-windows-menu-start').trim(), '48px');
+      view.click();
+    }
+  } finally { view.close(); }
+});
+
 test('official Windows zero-width geometry and fixed caption positioning remain intact', async () => {
   const frame = await readFile(new URL('../../../deepseek-harness/packages/client/ui-layout/src/client/AppFrame.tsx', import.meta.url), 'utf8');
   const css = await readFile(new URL('../../../deepseek-harness/packages/client/ui-sidebar/src/client/SidebarRoot.module.css', import.meta.url), 'utf8');

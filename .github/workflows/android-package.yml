@@ -5,9 +5,9 @@ on:
       release_tag:
         description: Existing release tag to receive the APK
         required: true
-        default: v0.1.3
+        default: v0.1.4
       publish:
-        description: Publish the verified APK to the release
+        description: Publish the verified signed release APK
         type: boolean
         required: true
         default: false
@@ -30,26 +30,43 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: plugins/link/package-lock.json
+          cache-dependency-path: |
+            plugins/link/package-lock.json
+            plugins/commander/package-lock.json
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - name: Install Link dependencies
-        run: npm ci --prefix plugins/link
-      - name: Build Android debug package
-        run: npm run build:android
-      - name: Verify package metadata
+      - name: Install plugin and server seed dependencies
+        run: |
+          npm ci --prefix plugins/link
+          npm ci --prefix plugins/commander
+      - name: Build and verify signed Android release
+        env:
+          DSH_ANDROID_KEYSTORE_BASE64: ${{ secrets.DSH_ANDROID_KEYSTORE_BASE64 }}
+          DSH_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.DSH_ANDROID_KEYSTORE_PASSWORD }}
+          DSH_ANDROID_KEY_ALIAS: ${{ secrets.DSH_ANDROID_KEY_ALIAS }}
+          DSH_ANDROID_KEY_PASSWORD: ${{ secrets.DSH_ANDROID_KEY_PASSWORD }}
         shell: bash
         run: |
-          test -f plugins/link/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          set -euo pipefail
+          test -n "$DSH_ANDROID_KEYSTORE_BASE64"
+          export DSH_ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/xiaojiao-android-release.jks"
+          trap 'rm -f "$DSH_ANDROID_KEYSTORE_PATH"' EXIT
+          umask 077
+          printf '%s' "$DSH_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$DSH_ANDROID_KEYSTORE_PATH"
+          npm run build:android -- --release --no-daemon
           version=$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).version")
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging plugins/link/mobile/android/app/build/outputs/apk/debug/app-debug.apk | grep "versionName='$version'"
-          cp plugins/link/mobile/android/app/build/outputs/apk/debug/app-debug.apk "dsh-plus-${version}-android-debug.apk"
+          apk="xiaojiao-$version-android.apk"
+          cp plugins/link/mobile/android/app/build/outputs/apk/release/app-release.apk "$apk"
+          sha256sum "$apk" > "$apk.sha256"
+          echo "ANDROID_ARTIFACT=$apk" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v4
         with:
-          name: dsh-plus-android-debug
-          path: dsh-plus-*-android-debug.apk
+          name: ${{ env.ANDROID_ARTIFACT }}
+          path: |
+            xiaojiao-*-android.apk
+            xiaojiao-*-android.apk.sha256
           if-no-files-found: error
           retention-days: 14
       - name: Publish verified Android APK
@@ -62,8 +79,8 @@ jobs:
         run: |
           set -euo pipefail
           version=$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).version")
-          test "$RELEASE_TAG" = "v${version}"
+          test "$RELEASE_TAG" = "v$version"
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "DSH-Plus ${version}" --notes "DSH-Plus application release with Xiaojiao branding and independent plugin updates. Android APK is a debug build for device testing." --latest=false
+            gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "小角 $version" --notes "小角正式应用，包含 DSH-Plus 插件、多设备连接与工具环境自动准备。Android 使用持久发行密钥签名。旧 debug 验收包首次迁移需卸载，后续正式版本可直接升级。" --latest=false
           fi
-          gh release upload "$RELEASE_TAG" "dsh-plus-${version}-android-debug.apk" --clobber
+          gh release upload "$RELEASE_TAG" "xiaojiao-$version-android.apk" "xiaojiao-$version-android.apk.sha256" --clobber

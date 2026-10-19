@@ -26,7 +26,6 @@
 .link-mobile-v3 .link-status-running { box-shadow: none; }
 .link-mobile-v3 .link-mobile-brand { display: flex; align-items: center; gap: 10px; color: var(--link-ink); font-size: 16px; font-weight: 650; letter-spacing: -.035em; }
 .link-mobile-v3 .link-mark { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--link-accent); color: var(--link-accent-ink); }
-.link-mobile-brand-sub { color: var(--link-muted); font-weight: 450; }
 .link-mobile-icon-button { display: grid; place-items: center; flex: none; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 10px; color: var(--link-ink); background: transparent; }
 .link-sidebar-open-icon { transform: scaleX(-1); }
 .link-mobile-v3 .cmd-ui-icon { pointer-events: none; }
@@ -188,6 +187,10 @@
 .link-mobile-pair-symbol { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 2px; border-radius: 13px; color: var(--link-ink); background: var(--link-panel); }
 .link-mobile-pair-card > h2 { font-size: 18px; font-weight: 600; }
 .link-mobile-pair-card > p { margin: -7px 0 5px; color: var(--link-muted); font-size: 12px; line-height: 1.8; }
+.link-mobile-pair-details { display: grid; gap: 8px; min-width: 0; padding: 13px; border-radius: 10px; background: var(--link-panel); }
+.link-mobile-pair-details > span { color: var(--link-muted); font-size: 11px; }
+.link-mobile-pair-details > strong { font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
+.link-mobile-pair-details input[readonly] { min-width: 0; font-family: monospace; font-size: 12px; user-select: all; }
 .link-mobile-scan-button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 49px; padding: 12px 16px; border: 0; border-radius: 11px; color: var(--link-accent-ink); background: var(--link-accent); font-size: 13px !important; font-weight: 600 !important; }
 .link-mobile-backup { min-width: 0; margin-top: 15px; overflow: hidden; border: 1px solid var(--link-faint); border-radius: 12px; background: var(--link-paper); }
 .link-mobile-backup > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 49px; padding: 14px 16px; color: var(--link-muted); font-size: 12px; list-style: none; cursor: pointer; }

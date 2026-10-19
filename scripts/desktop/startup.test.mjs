@@ -4,6 +4,20 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
 const renderer = await readFile(new URL('./renderer/dsh-plus-startup.js', import.meta.url), 'utf8');
+
+test('desktop startup keeps the app identity and local mascot beside the DeepSeek engine label', async () => {
+  const html = await readFile(new URL('./renderer/welcome.html', import.meta.url), 'utf8');
+  const css = await readFile(new URL('./renderer/dsh-plus-startup.css', import.meta.url), 'utf8');
+  assert.ok(html.includes('<title>小角</title>'));
+  assert.ok(html.includes('<h1>小角</h1>'));
+  assert.ok(html.indexOf('class="startup-mascot"') < html.indexOf('class="startup-engine"'));
+  assert.ok(html.includes('src="assets/dsh-plus-logo.png"'));
+  assert.ok(html.includes('<span class="startup-engine">DeepSeek</span>'));
+  assert.doesNotMatch(html, /(?:src|href)="https?:/);
+  assert.ok(css.includes('.startup-brand { display: flex;'));
+  assert.ok(css.includes('animation: xiaojiao-float'));
+  assert.ok(css.includes('@media (prefers-reduced-motion: reduce) { .startup-mascot { animation: none; } }'));
+});
 function startup(skip) {
   const handlers = new Map();
   const status = { textContent: '' };

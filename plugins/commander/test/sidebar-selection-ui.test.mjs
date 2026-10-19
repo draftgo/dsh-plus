@@ -27,6 +27,7 @@ function render(activeSessionId, options = {}) {
     workspaces: { list: { getSnapshot: () => options.workspaces ?? ({ archivedSessionIds: [] }) } },
     remoteAccess: { source: () => ({ subscribe: () => () => {}, getSnapshot: () => true }) },
     uiSession: { sessionStatus: { getSnapshot: () => options.statuses ?? new Map() } },
+    uiWorkspace: { openSession: id => options.onOpenSession?.(id) },
   };
   const tree = module.exports.Projects({ host, open() {}, newSession: options.newSession ?? (() => {}) });
   const walk = node => {
@@ -54,6 +55,18 @@ test('restoring and switching current conversation selects exactly one matching 
     assert.equal(nodes.filter(node => node.props.className?.split(' ').includes('cmd-selected')).length, 1);
     assert.equal(nodes.filter(node => node.props.className?.split(' ').includes('is-selected')).length, 1);
   }
+});
+
+test('official conversation rows navigate to their own Harness session after selection', () => {
+  const opened = [];
+  const nodes = render('first', { onOpenSession: id => opened.push(id) });
+  const rows = nodes.filter(node => node.props.className?.split(' ').includes('cmd-session'));
+  rows[1].props.onClick();
+  rows[2].props.onClick();
+  assert.deepEqual(opened, ['second', 'third']);
+  const selected = render(opened.at(-1)).filter(node => node.props['aria-current'] === 'page');
+  assert.equal(selected.length, 1);
+  assert(selected[0].children.some(node => node.type === 'span' && node.children.includes('third')));
 });
 
 test('official workspaces render projects and conversations before Commander state returns', () => {
@@ -86,7 +99,7 @@ test('live official sessions light their workspace without adding a global toolb
     assert.equal(activity.length, expected ? 1 : 0);
     assert.equal(activity[0]?.props.status, expected);
     const toolbar = nodes.find(node => node.props['aria-label'] === '快捷工具栏');
-    assert.equal(toolbar.children.length, 2, 'only new chat and search remain');
+    assert.equal(toolbar.children.length, 3, 'new chat, search and device launcher remain');
   }
 });
 

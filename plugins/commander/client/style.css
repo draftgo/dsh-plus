@@ -1,3 +1,7 @@
+/* The hidden New Session caption control no longer reserves a menu gap. */
+html[data-windows-titlebar]:has(.cmd-shell-sidebar .cmd-projects) {
+  --dsh-windows-menu-start: 48px;
+}
 /* The official sidebar and settings shell stay mounted. Only their geometry changes. */
 [class*="_root"]:has(> [class*="_regionArea"] .cmd-projects) {
   --dsh-sidebar-inline-padding: 6px;

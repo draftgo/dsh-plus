@@ -9,6 +9,17 @@ const { JSDOM } = createRequire(new URL('../../../deepseek-harness/package.json'
 const source = readFileSync(new URL('../../link/client/brand.jsx', import.meta.url), 'utf8');
 const code = transformSync(source, { loader: 'jsx', format: 'cjs' }).code;
 
+test('the shared app icon uses the approved light-beige VI while small favicons retain simplified eyes', () => {
+  const logo = new JSDOM(readFileSync(new URL('../../../assets/brand/dsh-plus-logo.svg', import.meta.url), 'utf8'), { contentType: 'image/svg+xml' });
+  const favicon = new JSDOM(readFileSync(new URL('../../../assets/brand/favicon.svg', import.meta.url), 'utf8'), { contentType: 'image/svg+xml' });
+  assert.equal(logo.window.document.documentElement.getAttribute('viewBox'), '0 0 1024 1024');
+  assert.equal(logo.window.document.querySelector('rect').getAttribute('fill'), '#EDE4D3');
+  assert.equal(logo.window.document.querySelector('g').getAttribute('transform'), 'translate(167,282) scale(1.15)');
+  assert.equal(favicon.window.document.querySelectorAll('circle').length, 2);
+  logo.window.close();
+  favicon.window.close();
+});
+
 test('brand favicon replaces both theme variants and restores existing icons when unloaded', () => {
   for (const initial of ['', '<link rel="icon" type="image/png" href="light.png" media="(prefers-color-scheme:light)"><link rel="icon" href="dark.svg" media="(prefers-color-scheme:dark)">']) {
     const dom = new JSDOM(`<!doctype html><head>${initial}</head>`), module = { exports: {} };

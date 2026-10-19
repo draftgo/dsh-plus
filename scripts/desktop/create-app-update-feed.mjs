@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 export async function createAppUpdateFeed({ installer, outDir, version }) {
   if (!/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(version)) throw new Error('Invalid application version');
   const bytes = await readFile(installer), name = basename(installer);
-  if (bytes.subarray(0, 2).toString() !== 'MZ' || name !== `dsh-plus-${version}-win-x64-setup.exe`) throw new Error('Expected matching DSH-Plus Windows installer');
+  if (bytes.subarray(0, 2).toString() !== 'MZ' || ![`xiaojiao-${version}-win-x64-setup.exe`, `dsh-plus-${version}-win-x64-setup.exe`].includes(name)) throw new Error('Expected matching 小角 / DSH-Plus Windows installer');
   const sha512 = createHash('sha512').update(bytes).digest('base64');
   const data = { version, files: [{ url: name, sha512, size: bytes.length }], path: name, sha512, releaseDate: new Date().toISOString() };
   await mkdir(outDir, { recursive: true });

@@ -2,9 +2,15 @@ import React, { useEffect, useState } from 'react';
 import * as runtime from './api.mjs';
 import { LinkMobileApp } from './mobile.jsx';
 import { BrandLogo } from './brand.jsx';
+import { DeviceCenter } from './device-center.jsx';
+import { hasDeviceCenter } from './device-runtime.mjs';
 
 /** Pair once, then run the same workspace and plugins as the desktop browser. */
 export function LinkWorkbenchEntry() {
+  if (hasDeviceCenter()) return <DeviceCenter />;
+  return <SingleWorkbenchEntry />;
+}
+function SingleWorkbenchEntry() {
   const [identity, setIdentity] = useState(() => runtime.bootstrap());
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
@@ -24,5 +30,5 @@ export function LinkWorkbenchEntry() {
     return () => { closed = true; };
   }, [identity?.token, attempt]);
   if (!identity?.token) return <LinkMobileApp />;
-  return <main className="link-workbench-loading" style={{ minHeight: '100dvh', display: 'grid', placeContent: 'center', justifyItems: 'center', gap: 16, padding: 24, boxSizing: 'border-box', fontFamily: 'system-ui', colorScheme: 'light dark' }}><BrandLogo size={64} /><h1 style={{ margin: 0, fontSize: 22 }}>DSH-Plus</h1><p role={error ? 'alert' : 'status'} style={{ maxWidth: 360, overflowWrap: 'anywhere' }}>{error || '正在打开工作台…'}</p>{error && <><button type="button" onClick={() => setAttempt(value => value + 1)}>重新打开工作台</button><button type="button" onClick={() => { runtime.clearIdentity(); setIdentity(null); }}>重新配对</button></>}</main>;
+  return <main className="link-workbench-loading" style={{ minHeight: '100dvh', display: 'grid', placeContent: 'center', justifyItems: 'center', gap: 16, padding: 24, boxSizing: 'border-box', fontFamily: 'system-ui', colorScheme: 'light dark' }}><BrandLogo size={64} /><h1 style={{ margin: 0, fontSize: 22 }}>小角</h1><p role={error ? 'alert' : 'status'} style={{ maxWidth: 360, overflowWrap: 'anywhere' }}>{error || '正在打开工作台…'}</p>{error && <><button type="button" onClick={() => setAttempt(value => value + 1)}>重新打开工作台</button><button type="button" onClick={() => { runtime.clearIdentity(); setIdentity(null); }}>重新配对</button></>}</main>;
 }

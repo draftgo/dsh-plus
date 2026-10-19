@@ -2,9 +2,10 @@
     <style name="Theme.DshPlus" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:colorAccent">#9ca8ff</item>
-        <item name="android:navigationBarColor">#0b0e14</item>
-        <item name="android:statusBarColor">#0b0e14</item>
-        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">@color/dsh_plus_brand_background</item>
+        <item name="android:statusBarColor">@color/dsh_plus_brand_background</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
         <item name="android:windowBackground">@drawable/dsh_plus_splash</item>
     </style>
     <style name="Theme.DshPlus.Scanner" parent="Theme.AppCompat.Light.NoActionBar">

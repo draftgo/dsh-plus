@@ -6,7 +6,7 @@ import { Commander } from '../src/runtime.mjs';
 test('owner tooling route reuses provider refs, protects writes and never exposes runtime secrets', async () => {
   const effects = [], routes = []; let applied = 0, stopped = false;
   const ctx = { effect(fn) { const dispose = fn(); if (dispose) effects.push(dispose); }, connection: { fetch: { register(route) { routes.push(route); return () => {}; } } } };
-  const installer = { list: async () => [{ id: 'codex' }], job: id => ({ id }), install: tool => ({ tool }), updateTool: tool => ({ tool, action: 'update' }), reinstall: tool => ({ tool, action: 'reinstall' }), uninstall: tool => ({ tool }), cancel: id => ({ id }), close: async () => { stopped = true; } };
+  const installer = { list: async () => [{ id: 'codex', runtimeNotice: '缺少 Node.js 时自动准备' }], job: id => ({ id }), install: (tool, options) => ({ tool, action: 'install', ...options }), updateTool: (tool, options) => ({ tool, action: 'update', ...options }), reinstall: (tool, options) => ({ tool, action: 'reinstall', ...options }), uninstall: tool => ({ tool }), cancel: id => ({ id }), close: async () => { stopped = true; } };
   const profiles = { list: async () => ({ profiles: [{ tool: 'codex', providerId: 'shared' }], backups: [{ id: 'backup', tool: 'codex' }] }), runtime: () => ({ env: { SECRET: 'never-expose' } }), save: async input => ({ tool: input.tool }), preview: async () => ({ revision: 'r', files: [] }), apply: async () => { applied++; return { backupId: 'backup' }; }, restore: async () => ({}), setBindings: async input => ({ bindings: { [input.providerId]: input.tools } }) };
   const commander = { sessions: new Map(), drivers: new Map(), connecting: new Map(), store: { directory: '/unused' } };
   const providers = { list: async () => [{ id: 'shared' }], models: async () => [{ id: 'model' }], resolve: async () => ({baseURL:'https://example.test/v1',apiKey:'server-only'}) };
@@ -15,8 +15,13 @@ test('owner tooling route reuses provider refs, protects writes and never expose
   assert.equal(routes[0].path, '/api/commander/tooling');
   const data = await (await fetch(request({ action: 'catalog' }))).json();
   assert.equal(data.tools[0].id, 'codex'); assert.equal(data.profiles[0].providerId, 'shared'); assert.doesNotMatch(JSON.stringify(data), /never-expose|SECRET/);
-  assert.deepEqual((await (await fetch(request({ action: 'update', tool: 'codex' }))).json()).job, { tool: 'codex', action: 'update' });
-  assert.deepEqual((await (await fetch(request({ action: 'reinstall', tool: 'codex' }))).json()).job, { tool: 'codex', action: 'reinstall' });
+  assert.equal(data.tools[0].runtimeNotice, '缺少 Node.js 时自动准备');
+  for (const action of ['install', 'update', 'reinstall']) {
+    assert.deepEqual((await (await fetch(request({ action, tool: 'codex' }))).json()).job, { tool: 'codex', action, source: 'mirror' });
+    for (const source of ['mirror', 'official']) assert.deepEqual((await (await fetch(request({ action, tool: 'codex', source }))).json()).job, { tool: 'codex', action, source });
+    for (const source of ['other', '', null, {}, 1]) assert.equal((await fetch(request({ action, tool: 'codex', source }))).status, 400);
+  }
+  assert.deepEqual((await (await fetch(request({ action: 'uninstall', tool: 'codex' }))).json()).job, { tool: 'codex' });
   assert.equal((await fetch(request({ action: 'catalog' }, { origin: 'https://evil.test' }))).status, 403);
   assert.equal((await fetch(request({ action: 'catalog' }, { 'content-type': 'text/plain' }))).status, 415);
   assert.equal((await fetch(request({ action: 'saveProfile', tool: 'codex', overrides: { config: { description: 'x'.repeat(100000) } } }))).status, 200);

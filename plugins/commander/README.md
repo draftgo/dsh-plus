@@ -242,4 +242,6 @@ Harness 仍持有宿主会话与权限体系；DSH-Plus 持有外部执行资源
 
 设置 → Harness 工具：检测工具，隔离安装/卸载，引用官方模型供应商，选择模型和协议，编辑高级 JSON，预览后备份应用或恢复。原生外部安装可以使用，但不提供删除其安装文件的入口。
 
+Codex 等 npm 工具点击安装后自动准备缺少或不兼容的 Node.js/npm，默认国内加速，可切换官方直连。环境安装在 DSH-Plus 用户目录，无需管理员权限，不修改系统 PATH 或用户 npm 配置。安装、更新、重装均显示环境准备与版本验证进度；托管环境在重启后继续复用。Hermes 的 uv/Git 与 Claude Desktop 仍按各自支持边界处理。接口契约见 `openapi.json`。
+
 新增 Gemini CLI、Hermes、Grok Build、MiniMax Code 的 ACP 接管；Claude Desktop 和 OpenClaw 当前支持配置管理，不提供会话接管。Desktop 自动安装、代理转换/故障转移、MCP/Skills/Prompts 同步及 CC Switch 数据迁移仍待实现。详细矩阵见根目录 Design/CCSwitch替代实现进度.md，适配器契约见 TOOL-CONFIG.md。

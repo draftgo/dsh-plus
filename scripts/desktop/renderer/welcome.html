@@ -4,15 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
-    <title>DSH-Plus</title>
+    <title>小角</title>
     <link rel="stylesheet" href="dsh-plus-startup.css">
     <script src="dsh-plus-startup.js" defer></script>
   </head>
   <body>
     <div class="drag-region" aria-hidden="true"></div>
     <main>
-      <img src="assets/dsh-plus-logo.png" alt="小角" width="72" height="72">
-      <h1>DSH-Plus</h1>
+      <div class="startup-brand">
+        <img class="startup-mascot" src="assets/dsh-plus-logo.png" alt="小角" width="72" height="72">
+        <span class="startup-engine">DeepSeek</span>
+      </div>
+      <h1>小角</h1>
       <p id="startup-status" role="status" aria-live="polite">正在准备工作台…</p>
       <button id="startup-retry" type="button" hidden>重试</button>
     </main>

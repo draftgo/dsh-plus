@@ -5,6 +5,8 @@ plugins {
 
 def linkWebDir = file('../../../dist/web')
 def generatedAssets = layout.buildDirectory.dir('generated/linkAssets')
+def releaseSigning = ['DSH_ANDROID_KEYSTORE_PATH', 'DSH_ANDROID_KEYSTORE_PASSWORD', 'DSH_ANDROID_KEY_ALIAS', 'DSH_ANDROID_KEY_PASSWORD'].collectEntries { [(it): System.getenv(it)] }
+def hasReleaseSigning = releaseSigning.values().every { it }
 
 android {
     namespace 'cn.draftgo.dshplus.link'
@@ -15,11 +17,33 @@ android {
         applicationId 'cn.draftgo.dshplus.link'
         minSdk 26
         targetSdk 35
-        versionCode 3
-        versionName '0.1.3'
+        versionCode 4
+        versionName '0.1.4'
+    }
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile file(releaseSigning.DSH_ANDROID_KEYSTORE_PATH)
+                storePassword releaseSigning.DSH_ANDROID_KEYSTORE_PASSWORD
+                keyAlias releaseSigning.DSH_ANDROID_KEY_ALIAS
+                keyPassword releaseSigning.DSH_ANDROID_KEY_PASSWORD
+            }
+        }
+    }
+    buildTypes {
+        release {
+            debuggable false
+            signingConfig signingConfigs.release
+        }
     }
 
     buildFeatures { buildConfig true }
+    packaging {
+        resources {
+            excludes += ['META-INF/versions/**/OSGI-INF/MANIFEST.MF']
+            merges += ['META-INF/LICENSE*', 'META-INF/NOTICE*']
+        }
+    }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
@@ -30,8 +54,19 @@ android {
     }
 }
 
+tasks.register('validateReleaseSigning') {
+    doLast {
+        if (!hasReleaseSigning) throw new GradleException('Release signing requires DSH_ANDROID_KEYSTORE_PATH, DSH_ANDROID_KEYSTORE_PASSWORD, DSH_ANDROID_KEY_ALIAS and DSH_ANDROID_KEY_PASSWORD')
+        if (!file(releaseSigning.DSH_ANDROID_KEYSTORE_PATH).isFile()) throw new GradleException('Android release keystore does not exist')
+    }
+}
+tasks.configureEach { task ->
+    if (task.name == 'preReleaseBuild') task.dependsOn(tasks.named('validateReleaseSigning'))
+}
+
 tasks.register('prepareLinkAssets') {
     inputs.dir(linkWebDir).optional()
+    inputs.dir(file('../../../dist/server')).optional()
     outputs.dir(generatedAssets)
     doLast {
         if (!new File(linkWebDir, 'index.html').isFile()) {
@@ -41,6 +76,9 @@ tasks.register('prepareLinkAssets') {
         delete(out)
         out.mkdirs()
         copy { from linkWebDir; into out }
+        def seed = file('../../../dist/server')
+        if (!new File(seed, 'manifest.json').isFile()) throw new GradleException('Missing server seed: run node scripts/server/package-seed.mjs first')
+        copy { from seed; into new File(out, 'server'); rename 'server-seed.tar.gz', 'server-seed.bundle' }
     }
 }
 preBuild.dependsOn(tasks.named('prepareLinkAssets'))
@@ -50,5 +88,8 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'androidx.webkit:webkit:1.12.1'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'com.github.mwiede:jsch:2.28.8'
+    implementation 'org.bouncycastle:bcprov-jdk18on:1.80'
     implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
+    testImplementation 'junit:junit:4.13.2'
 }

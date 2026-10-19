@@ -45,8 +45,36 @@ jobs:
           exit $LASTEXITCODE
       - name: Build full Windows installer and verify runtime
         run: npm run package:plus:win
-      - name: Verify silent installation and preinstalled Plus
-        run: ./scripts/desktop/test-install-windows.ps1
+      - name: Download previous installer for in-place upgrade verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v0.1.3 --repo ${{ github.repository }} --pattern 'dsh-plus-0.1.3-win-x64-setup.exe' --dir previous
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release download v0.1.3 --repo ${{ github.repository }} --pattern 'SHA256SUMS.txt' --dir previous
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $previous = Join-Path $PWD 'previous/dsh-plus-0.1.3-win-x64-setup.exe'
+          $expected = Get-Content previous/SHA256SUMS.txt | Where-Object { $_ -match '  dsh-plus-0.1.3-win-x64-setup.exe$' }
+          if (-not $expected -or ($expected -split '\s+')[0] -ne (Get-FileHash $previous -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'Previous installer checksum mismatch' }
+      - name: Verify fresh install and DSH-Plus to 小角 in-place upgrade
+        run: ./scripts/desktop/test-install-windows.ps1 -PreviousInstaller previous/dsh-plus-0.1.3-win-x64-setup.exe
+      - name: Record verified artifact source
+        run: |
+          @'
+          import { createHash } from 'node:crypto';
+          import { readFile, readdir, writeFile } from 'node:fs/promises';
+          const directory = 'artifacts/windows';
+          const names = (await readdir(directory)).filter(name => /(?:\.exe|\.blockmap|latest\.yml)$/.test(name)).sort();
+          const app = JSON.parse(await readFile('package.json'));
+          const artifact = `xiaojiao-${app.version}-win-x64-setup.exe`;
+          if (!names.includes(artifact)) throw new Error('Expected 小角 installer is missing');
+          const files = await Promise.all(names.map(async name => {
+            const bytes = await readFile(`${directory}/${name}`);
+            return { name, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+          }));
+          await writeFile(`${directory}/build-source.json`, JSON.stringify({ schemaVersion: 1, sourceSha: process.env.GITHUB_SHA, version: app.version, artifact, verified: ['packaged-runtime', 'fresh-install', 'legacy-upgrade'], files }, null, 2) + '\n');
+          '@ | node --input-type=module
+          exit $LASTEXITCODE
       - name: Retain installer
         uses: actions/upload-artifact@v4
         with:
@@ -55,6 +83,7 @@ jobs:
             artifacts/windows/*.exe
             artifacts/windows/*.blockmap
             artifacts/windows/latest.yml
+            artifacts/windows/build-source.json
           if-no-files-found: error
           retention-days: 14
       - name: Retain diagnostics

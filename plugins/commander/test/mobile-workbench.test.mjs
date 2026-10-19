@@ -20,17 +20,24 @@ test('shared mobile shell uses official navigation, traps drawer focus, restores
   Object.defineProperty(dom.window, 'innerHeight', { value: 720, writable: true });
   dom.window.HTMLElement.prototype.getClientRects = function () { return this.hidden ? [] : [{}]; };
   const previous = new Map();
-  for (const [key, value] of Object.entries({ window: dom.window, document: dom.window.document, MutationObserver: dom.window.MutationObserver, requestAnimationFrame: callback => { callback(); return 1; }, IS_REACT_ACT_ENVIRONMENT: true })) {
+  for (const [key, value] of Object.entries({ window: dom.window, document: dom.window.document, MutationObserver: dom.window.MutationObserver, requestAnimationFrame: callback => setTimeout(callback, 0), cancelAnimationFrame: clearTimeout, IS_REACT_ACT_ENVIRONMENT: true })) {
     previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   }
   const module = { exports: {} };
-  runInNewContext(compiled, { module, exports: module.exports, window: dom.window, document: dom.window.document, MutationObserver: dom.window.MutationObserver, requestAnimationFrame: callback => { callback(); return 1; }, queueMicrotask, require: id => id === 'react' ? React : id.endsWith('.css') ? css : id.includes('resize-settling') ? { trackFrameResize: () => () => {} } : { UIIcon: ({ name, selected }) => React.createElement('span', { 'data-icon': name, 'data-selected': selected }) } });
+  // Browser-dispatched touch clicks may checkpoint microtasks between native
+  // listeners, before React's delegated listener receives the original target.
+  runInNewContext(compiled, { module, exports: module.exports, window: dom.window, document: dom.window.document, MutationObserver: dom.window.MutationObserver, requestAnimationFrame: callback => setTimeout(callback, 0), cancelAnimationFrame: clearTimeout, queueMicrotask: callback => callback(), require: id => id === 'react' ? React : id.endsWith('.css') ? css : id.includes('resize-settling') ? { trackFrameResize: () => () => {} } : { UIIcon: ({ name, selected }) => React.createElement('span', { 'data-icon': name, 'data-selected': selected }) } });
   const frame = dom.window.document.querySelector('.cmd-shell-frame');
-  let starts = 0, toggles = 0;
+  let starts = 0, toggles = 0, opened = 0;
+  document.addEventListener('click', event => {
+    if (!event.target.closest('.cmd-session')) return;
+    assert.equal(frame.hasAttribute('data-sidebar-collapsed'), false, 'the delegated session handler runs before the drawer closes');
+    opened++;
+  });
   const ctx = { layout: { toggleSidebar: () => { toggles++; frame.toggleAttribute('data-sidebar-collapsed'); } }, uiWorkspace: { startSession: () => { starts++; } } };
   const root = createRoot(dom.window.document.getElementById('react'));
-  const flush = fn => React.act(async () => { fn?.(); await new Promise(resolve => setImmediate(resolve)); });
+  const flush = fn => React.act(async () => { fn?.(); await new Promise(resolve => setTimeout(resolve, 5)); });
   const click = selector => flush(() => dom.window.document.querySelector(selector).click());
   try {
     await flush(() => root.render(React.createElement(module.exports.MobileWorkbench, { ctx })));
@@ -53,6 +60,7 @@ test('shared mobile shell uses official navigation, traps drawer focus, restores
     await click('.cmd-mobile-toolbar button');
     await click('.cmd-session');
     assert.equal(toggles, 4);
+    assert.equal(opened, 1);
     await click('.cmd-mobile-toolbar button:last-child');
     assert.equal(starts, 1);
     await click('.cmd-mobile-toolbar button');
@@ -92,6 +100,11 @@ test('adapter owns reversible CSS/slot only; official settings and editor remain
   for (const cleanup of cleanups) cleanup();
   assert.equal(dom.window.document.querySelectorAll('style').length, 0);
   dom.window.close();
+});
+
+test('mobile header clears safe areas and cancels the desktop corner overhang', () => {
+  assert.match(css, /header:has\(\[data-conversation-header-leading\]\)\s*\{[\s\S]*?padding-inline-start: max\(12px, env\(safe-area-inset-left, 0px\)\);[\s\S]*?padding-inline-end: max\(12px, env\(safe-area-inset-right, 0px\)\);/);
+  assert.match(css, /\[data-conversation-header-corner\]\s*\{ margin-inline-end: 0; \}/);
 });
 
 test('frame resize holds transitions until width settles and cleans up', () => {

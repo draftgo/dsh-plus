@@ -13,6 +13,7 @@ if (typeof window !== 'undefined') window.__linkNativeResult = (id, value) => {
   pending.delete(id); clearTimeout(request.timer);
   try {
     let result = typeof value === 'string' ? JSON.parse(value) : value;
+    if (result && 'ok' in result && result.ok === false) throw new Error(result.error || '设备操作失败');
     if (result && 'body' in result) {
       const envelope = result;
       result = typeof envelope.body === 'string' ? JSON.parse(envelope.body) : envelope.body;
@@ -74,6 +75,18 @@ export function nativeCall(method, path, body) {
     const timer = setTimeout(() => { pending.delete(id); reject(new Error('连接超时，请检查网络后重试')); }, 25000);
     pending.set(id, { resolve, reject, timer });
     try { bridge.request(JSON.stringify({ id, method, path, body })); }
+    catch (error) { pending.delete(id); clearTimeout(timer); reject(error); }
+  });
+}
+/** Device management stays on the trusted local carrier, never a remote page. */
+export function nativeDeviceCall(action, args = {}) {
+  const bridge = native();
+  if (!bridge?.deviceCall) return Promise.reject(new Error('请更新客户端以管理多台设备'));
+  const id = `device-${Date.now()}-${++sequence}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error('设备操作超时，请重试')); }, 30000);
+    pending.set(id, { resolve, reject, timer });
+    try { bridge.deviceCall(JSON.stringify({ ...args, action, id })); }
     catch (error) { pending.delete(id); clearTimeout(timer); reject(error); }
   });
 }

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "harnessVersion": "0.2.1-alpha.3",
+  "harnessCommit": "571902028a75c64c1d767f4ae5fd099485f0ddf0",
+  "pluginVersion": "0.1.6",
+  "bundle": "@dsh-plus/desktop-52cebe7a4ad2b5e4",
+  "sha256": "b1f744cf83298de71693eeb0dd7e486a74b2c2f04a168b2d69c5ae09bc518ba1"
+}

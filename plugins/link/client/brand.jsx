@@ -6,7 +6,7 @@ export const brandIcon = `data:image/svg+xml,${encodeURIComponent(logo)}`;
 const faviconIcon = `data:image/svg+xml,${encodeURIComponent(favicon)}`;
 
 export function BrandLogo({ size = 32, className = '', decorative = false }) {
-  return <img src={brandIcon} width={size} height={size} className={className} alt={decorative ? '' : 'DSH-Plus · 小角'} style={{ display: 'block', flex: 'none' }} />;
+  return <img src={brandIcon} width={size} height={size} className={className} alt={decorative ? '' : '小角'} style={{ display: 'block', flex: 'none' }} />;
 }
 
 /** Keep both official light/dark favicon nodes branded; restore them when the plugin unloads. */

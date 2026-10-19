@@ -28,6 +28,17 @@ function Select({ label, value, options, onChange, disabled, empty = '请选择'
   return <div className="cmd-tool-field"><span>{label}</span><Menu open={open && !disabled} onClose={() => setOpen(false)} anchor={trigger} className="cmd-tool-select-anchor" getAnchorRect={() => anchor.current?.getBoundingClientRect() ?? null} side="bottom" align="start" portal autoFocus listClassName="cmd-tool-select-menu"><input autoFocus aria-label={'搜索' + label} value={query} placeholder={'搜索' + label} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); const buttons = event.currentTarget.closest('[role=menu]')?.querySelectorAll('[role=menuitem]'); if (buttons?.length) buttons[event.key === 'ArrowDown' ? 0 : buttons.length - 1].focus(); } if (event.key !== 'Escape') event.stopPropagation(); }} />{matches.map(item => <button role="menuitem" data-selected={item.value === value} key={item.value} type="button" onClick={() => { onChange(item.value); setOpen(false); }}><span className="cmd-tool-option-label">{item.icon}<span>{item.label}</span></span>{item.value === value && <UIIcon name="check" size={14} />}</button>)}{!matches.length && <p>没有可选项</p>}</Menu></div>;
 }
 
+function DownloadSource({ value, disabled, onChange }) {
+  const options = [{ value: 'mirror', label: '国内加速' }, { value: 'official', label: '官方直连' }];
+  const navigate = event => {
+    if (disabled || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === 'Home' ? 'mirror' : event.key === 'End' ? 'official' : value === 'mirror' ? 'official' : 'mirror';
+    onChange(next); event.currentTarget.querySelector('[data-source="' + next + '"]')?.focus();
+  };
+  return <fieldset className="cmd-tool-download-source" disabled={disabled}><legend>下载源</legend><div role="radiogroup" aria-label="下载源" onKeyDown={navigate}>{options.map(item => <button key={item.value} type="button" role="radio" data-source={item.value} tabIndex={value === item.value ? 0 : -1} aria-checked={value === item.value} disabled={disabled} onClick={() => onChange(item.value)}>{item.label}</button>)}</div></fieldset>;
+}
+
 function ToolTabs({ tools, selected, disabled, onChange }) {
   const dragScroll = useRef(null);
   if (!dragScroll.current) dragScroll.current = createTabDragScroll();
@@ -50,6 +61,7 @@ export function ToolSettingsSection({ close }) {
   const [loading, setLoading] = useState(true), [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [revision, setRevision] = useState(0);
   const [draft, setDraft] = useState(() => profileDraft()), [models, setModels] = useState([]), [modelLoading, setModelLoading] = useState(false), [modelError, setModelError] = useState(''), [modelRevision, setModelRevision] = useState(0);
   const [job, setJob] = useState(null), [confirm, setConfirm] = useState(null), [preview, setPreview] = useState(null);
+  const [downloadSource, setDownloadSource] = useState('mirror');
   const mounted = useRef(true);
   const rememberJob = value => { setJob(value); if (value) setData(current => current ? ({ ...current, tools: current.tools.map(item => item.id === value.toolId ? { ...item, job: value } : item) }) : current); };
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -68,6 +80,7 @@ export function ToolSettingsSection({ close }) {
   const subscription = providerIdentity?.authMode === 'subscription';
   useEffect(() => { setDraft(profileDraft(profile)); setPreview(null); setModelError(''); setJob(tool?.job || null); }, [selected, profile]);
   useEffect(() => { setJob(tool?.job || null); }, [selected, tool?.job]);
+  useEffect(() => { if (activeJob(job) && ['mirror', 'official'].includes(job.source)) setDownloadSource(job.source); }, [job?.id, job?.source, job?.status]);
   useEffect(() => {
     const controller = new AbortController(); setModels([]); setModelError(''); setModelLoading(false);
     if (!draft.providerId || subscription) return;
@@ -81,7 +94,7 @@ export function ToolSettingsSection({ close }) {
     timer = setTimeout(poll, 650); return () => { controller.abort(); clearTimeout(timer); };
   }, [job?.id, job?.status]);
   const run = async work => { setBusy(true); setError(''); setNotice(''); try { await work(); } catch (failure) { if (mounted.current) setError(failure.message); } finally { if (mounted.current) setBusy(false); } };
-  const install = action => run(async () => { const value = await request(action, { tool: selected }); rememberJob(value.job); setConfirm(null); });
+  const install = action => run(async () => { const value = await request(action, { tool: selected, ...(action !== 'uninstall' && tool?.installer === 'npm' ? { source: downloadSource } : {}) }); rememberJob(value.job); setConfirm(null); });
   const saveDefault = () => run(async () => {
     const overrides = parseOverrides(draft.overrides);
     const quickSettings = validateQuickSettings(selected, draft.quickSettings);
@@ -109,6 +122,7 @@ export function ToolSettingsSection({ close }) {
     {loading && !data ? <p className="cmd-tool-empty" role="status">正在检测已安装工具…</p> : !data ? <button type="button" className="cmd-tool-button" onClick={() => setRevision(value => value + 1)}>重新加载</button> : <>
     <div className="cmd-tool-workbench"><ToolTabs tools={tools} selected={selected} disabled={busy} onChange={chooseTool} />
     {tool && <main className="cmd-tool-detail" role="tabpanel" id={'cmd-tool-panel-' + selected} aria-labelledby={'cmd-tool-tab-' + selected}><div className="cmd-tool-detail-heading"><div><h3><ToolBrandIcon tool={tool.id} size={22} />{tool.name}</h3><div className="cmd-tool-badges"><span data-ready={state.installed}>{state.installation}{tool.version ? ' · ' + tool.version : ''}</span><span data-ready={state.chatSupported}>{state.chatSupported ? '可对话' : '仅配置'}</span>{hasManaged && <span data-ready={tool.managedInstalled}>独立副本{tool.managedVersion ? ' · ' + tool.managedVersion : ''}</span>}</div></div><div className="cmd-tool-install-actions">{!hasManaged && <button type="button" className="cmd-tool-button" disabled={!state.canInstall || busy || activeJob(job)} title={tool.installReason || undefined} onClick={() => void install('install')}>{tool.systemExecutable || tool.source === 'external' ? '安装独立副本' : '安装'}</button>}{hasManaged && <><button type="button" className="cmd-tool-button" disabled={!state.canUpdate || busy || activeJob(job)} title={tool.updateReason || undefined} onClick={() => void install('update')}>更新副本</button><button type="button" className="cmd-tool-button" disabled={!state.canReinstall || busy || activeJob(job)} title={tool.reinstallReason || undefined} onClick={() => setConfirm({ kind: 'reinstall' })}>重装</button><button type="button" className="cmd-tool-button" disabled={!state.canUninstall || busy || activeJob(job)} title={tool.uninstallReason || undefined} onClick={() => setConfirm({ kind: 'uninstall' })}>卸载副本</button></>}</div></div>
+      {tool.installer === 'npm' && <div className="cmd-tool-download"><DownloadSource value={downloadSource} onChange={setDownloadSource} disabled={busy || activeJob(job)} /><p className="cmd-tool-hint">{tool.runtimeNotice || '缺少 Node.js / npm 时自动准备，无需手动安装。'}</p></div>}
       <div className="cmd-tool-native-status"><UIIcon name="check" size={15} /><div><strong>{native?.hasConfiguration ? '已发现本机配置，保持原样' : '已有登录与本机配置由原工具管理'}</strong><p>保存方案只写入 DSH+。安装独立副本不会替换系统工具，卸载也保留配置与历史记录。</p></div></div>
       {(tool.systemExecutable || tool.managedExecutable) && <details className="cmd-tool-paths"><summary>安装位置{tool.systemExecutable && ' · 优先使用系统工具'}</summary>{tool.systemExecutable && <p><span>系统工具</span><code>{tool.systemExecutable}</code></p>}{tool.managedExecutable && <p><span>DSH+ 独立副本</span><code>{tool.managedExecutable}</code></p>}</details>}
       {!hasManaged && !tool.canInstall && tool.installReason && <p className="cmd-tool-hint">{tool.id === 'claude-desktop' ? 'Claude Desktop 需要使用官方平台安装器手动安装。' : tool.installReason}</p>}{state.installed && !tool.canUninstall && tool.uninstallReason && <p className="cmd-tool-hint">{tool.uninstallReason}</p>}

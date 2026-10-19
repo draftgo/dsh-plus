@@ -12,7 +12,7 @@ export async function buildLink() {
   await build({
     entryPoints: [fileURLToPath(new URL('../../link/src/index.mjs', import.meta.url))],
     outfile: fileURLToPath(new URL('link.mjs', output)), bundle: true,
-    platform: 'node', format: 'esm', target: 'node22', minify: true,
+    platform: 'node', format: 'esm', target: 'node22', minify: true, external: ['ssh2', 'ws'],
     banner: { js: "import { createRequire as linkCreateRequire } from 'node:module'; const require = linkCreateRequire(import.meta.url);" },
     logLevel: 'warning', legalComments: 'eof',
   });

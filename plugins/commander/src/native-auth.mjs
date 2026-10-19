@@ -11,7 +11,7 @@ export function createNativeAuth({ installer, executor = execute, env = process.
       const launch = await installer.resolveLaunch(tool);
       if (!launch) return { tool, status: 'not-installed' };
       const args = tool === 'codex' ? ['login', 'status'] : ['auth', 'status', '--json'];
-      const output = await executor(launch.command, [...launch.args, ...args], { env: { ...env }, timeout: 5000, maxBuffer: 32768, windowsHide: true });
+      const output = await executor(launch.command, [...launch.args, ...args], { env: { ...env, ...launch.env }, timeout: 5000, maxBuffer: 32768, windowsHide: true });
       if (tool === 'codex') {
         const text = String(output.stdout || '') + String(output.stderr || '');
         return { tool, status: /logged in using chatgpt/iu.test(text) ? 'subscription' : /logged in using (?:an? )?api key/iu.test(text) ? 'api' : 'unknown' };

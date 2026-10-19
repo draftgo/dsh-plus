@@ -7,6 +7,7 @@ import { Interaction } from './interaction.jsx';
 import { defaultProjectId, recentSessions } from './mobile-state.mjs';
 import { MobileEmpty, MobileSidebar, SessionList, SessionSearch } from './mobile-navigation.jsx';
 import { BrandLogo } from './brand.jsx';
+import { deviceName, rememberDeviceName } from './pairing-state.mjs';
 
 function useMobileStyle() {
   useLinkStyle();
@@ -20,6 +21,7 @@ export function LinkMobileApp({ runtime = nativeRuntime, theme: controlledTheme,
   const pendingCreate = useRef(null);
   const messagesRef = useRef(null), viewportRef = useRef(null), composing = useRef(false);
   const pairGeneration = useRef(0);
+  const pairFlight = useRef(false), autoPairAttempt = useRef('');
   const [identity, setIdentity] = useState(initial), [screen, setScreen] = useState(initial?.token ? 'recent' : 'pair');
   const [sidebarOpen, setSidebarOpen] = useState(false), [query, setQuery] = useState(''), [runningOnly, setRunningOnly] = useState(false);
   const [localTheme, setLocalTheme] = useState(() => globalThis.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
@@ -30,7 +32,8 @@ export function LinkMobileApp({ runtime = nativeRuntime, theme: controlledTheme,
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
   const drafts = useRef(new Map()), stayAtBottom = useRef(true);
   const [pairUri, setPairUri] = useState(() => contextUri(initial) || (!runtime.isPreview ? new URLSearchParams(location.hash.slice(1)).get('code') : '') || '');
-  const [name, setName] = useState(initial?.name || ''), [pairing, setPairing] = useState(null), [pairState, setPairState] = useState('');
+  const [autoPairUri, setAutoPairUri] = useState(() => initial?.token ? '' : pairUri);
+  const [name, setName] = useState(() => deviceName(initial?.name, { persist: !runtime.isPreview })), [pairing, setPairing] = useState(null), [pairState, setPairState] = useState('');
   const [state, setState] = useState(null), [projectId, setProjectId] = useState(''), [session, setSession] = useState(null), [history, setHistory] = useState({ messages: [], interactions: [], running: false });
   const [draft, setDraft] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false), [sendPending, setSendPending] = useState(null), [revision, setRevision] = useState(0), [model, setModel] = useState('');
   const [online, setOnline] = useState(() => navigator.onLine !== false);
@@ -39,8 +42,13 @@ export function LinkMobileApp({ runtime = nativeRuntime, theme: controlledTheme,
     const changed = () => {
       const next = bootstrap();
       if (isLocalIdentitySave(next)) return;
+      // Android may redeliver the same scan after page load. Do not invalidate
+      // the single-use request already sent for this code.
+      if (!next?.token && contextUri(next) && contextUri(next) === autoPairAttempt.current) return;
       pairGeneration.current++;
+      pairFlight.current = false;
       setIdentity(next); setPairUri(contextUri(next)); setScreen(next?.token ? 'recent' : 'pair');
+      setAutoPairUri(next?.token ? '' : contextUri(next));
       setState(null); setSession(null); setSidebarOpen(false); setSendPending(null); setDraft(''); setStateError(''); setHistoryError(''); drafts.current.clear(); pendingCreate.current = null;
       setPairing(null); setPairState(''); setError(''); setBusy(false);
       if (next?.name) setName(next.name);
@@ -48,6 +56,7 @@ export function LinkMobileApp({ runtime = nativeRuntime, theme: controlledTheme,
     if (runtime.subscribe) return runtime.subscribe(changed);
     window.addEventListener('link:bootstrap', changed); return () => window.removeEventListener('link:bootstrap', changed);
   }, [runtime]);
+  useEffect(() => { if (!runtime.isPreview) rememberDeviceName(name); }, [name, runtime.isPreview]);
   useEffect(() => {
     const viewport = window.visualViewport;
     if (!viewport) return;
@@ -93,6 +102,7 @@ export function LinkMobileApp({ runtime = nativeRuntime, theme: controlledTheme,
         const result = await call('pair/status', { requestId: pairing.requestId, pollToken: pairing.pollToken });
         if (closed || pairing.generation !== pairGeneration.current) return;
         setPairState(result.status);
+        setError('');
         if (result.status === 'approved' && result.token) {
           const next = { ...pairing.context, token: result.token, deviceId: result.deviceId }; saveIdentity(next); setIdentity(next); setPairing(null); setScreen('recent'); setError(''); return;
         }
@@ -103,18 +113,27 @@ export function LinkMobileApp({ runtime = nativeRuntime, theme: controlledTheme,
     poll(); return () => { closed = true; clearTimeout(timer); };
   }, [runtime, pairing]);
   useEffect(() => { if (screen === 'chat' && messagesRef.current && stayAtBottom.current) messagesRef.current.scrollTop = messagesRef.current.scrollHeight; }, [screen, session?.id, history.messages]);
-  const pair = async event => {
-    event?.preventDefault(); const generation = ++pairGeneration.current; setBusy(true); setError(''); setPairing(null); setPairState('');
+  const pair = async (event, input = pairUri) => {
+    event?.preventDefault();
+    if (pairFlight.current || pairing || pairState === 'pending' || pairState === 'rejected' || pairState === 'expired') return;
+    pairFlight.current = true;
+    const generation = ++pairGeneration.current; setBusy(true); setError(''); setPairing(null); setPairState('');
     try {
-      const context = { ...pairingContext(pairUri), name: name.trim() || '我的手机' };
+      const context = { ...pairingContext(input), name: name.trim() || deviceName('', { persist: !runtime.isPreview }) };
       if (!context.code) throw new Error('配对地址缺少一次性配对码');
       if (!isNative() && new URL(context.url).origin !== location.origin) throw new Error('请打开该主机的 HTTPS 配对页面');
+      setName(context.name);
       saveIdentity(context); const result = await call('pair', { code: context.code, name: context.name });
       if (generation !== pairGeneration.current) return;
       setPairing({ ...result, context, generation }); setPairState('pending');
       if (!runtime.isPreview && location.hash) window.history.replaceState(null, '', location.pathname + location.search);
-    } catch (e) { if (generation === pairGeneration.current) setError(e.message); } finally { if (generation === pairGeneration.current) setBusy(false); }
+    } catch (e) { if (generation === pairGeneration.current) setError(e.message); } finally { if (generation === pairGeneration.current) { pairFlight.current = false; setBusy(false); } }
   };
+  useEffect(() => {
+    if (screen !== 'pair' || identity?.token || !autoPairUri || autoPairAttempt.current === autoPairUri) return;
+    autoPairAttempt.current = autoPairUri;
+    void pair(undefined, autoPairUri);
+  }, [autoPairUri, screen, identity?.token]);
   const choose = item => {
     if (busy || (sendPending && sendPending.id !== item.id)) { setError('请先重试确认上一条消息的发送结果。'); return; }
     if (session) drafts.current.set(session.id, draft);
@@ -158,28 +177,34 @@ export function LinkMobileApp({ runtime = nativeRuntime, theme: controlledTheme,
       requestAnimationFrame(() => { if (messagesRef.current) messagesRef.current.scrollTop = beforeTop + messagesRef.current.scrollHeight - beforeHeight; });
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   };
-  const disconnect = () => { pairGeneration.current++; clearIdentity(); setIdentity(null); setPairing(null); setPairState(''); setPairUri(''); setState(null); setSession(null); pendingCreate.current = null; setSendPending(null); setScreen('pair'); setSidebarOpen(false); setDraft(''); drafts.current.clear(); setError(''); setBusy(false); };
+  const disconnect = () => { pairGeneration.current++; pairFlight.current = false; autoPairAttempt.current = ''; setAutoPairUri(''); clearIdentity(); setIdentity(null); setPairing(null); setPairState(''); setPairUri(''); setState(null); setSession(null); pendingCreate.current = null; setSendPending(null); setScreen('pair'); setSidebarOpen(false); setDraft(''); drafts.current.clear(); setError(''); setBusy(false); };
   const project = state?.projects?.find(p => p.id === (screen === 'chat' ? session?.projectId : projectId));
   const sessions = recentSessions(state?.sessions || [], state?.projects || [], query).filter(item => !runningOnly || item.running);
   const displayedError = error || stateError || historyError;
   const connectionState = !online || stateError || historyError ? 'failed' : state ? 'running' : 'waiting';
   const connectionLabel = !online ? '网络已断开' : stateError || historyError ? '连接中断' : state ? '已连接' : '正在连接';
   const retry = <div className="link-mobile-recovery"><ErrorText>{displayedError || (!online ? '网络已断开，请检查 Wi-Fi 或移动网络。' : '')}</ErrorText><Button onClick={() => { setError(''); refresh(); }} disabled={busy}>重新连接</Button></div>;
-  const updatePairUri = value => { pairGeneration.current++; setPairing(null); setPairState(''); setBusy(false); setError(''); setPairUri(value); };
+  const updatePairUri = value => { pairGeneration.current++; pairFlight.current = false; setAutoPairUri(''); setPairing(null); setPairState(''); setBusy(false); setError(''); setPairUri(value); };
+  const pairWaiting = pairState === 'pending' || pairState === 'approving';
+  const pairPending = busy || pairWaiting;
+  const pairTerminal = pairState === 'rejected' || pairState === 'expired';
+  let pairDetails;
+  try { if (pairUri) pairDetails = pairingContext(pairUri); } catch {}
 
   if (screen === 'pair') return <main ref={viewportRef} className="link-mobile link-mobile-v3 link-mobile-pair" data-theme={theme}>
-    <header className="link-mobile-topbar"><Brand /><span className="link-mobile-connection"><StatusDot state={online ? 'idle' : 'failed'} />{online ? '尚未连接' : '网络已断开'}</span></header>
+    <header className="link-mobile-topbar"><Brand /><span className="link-mobile-connection"><StatusDot state={!online ? 'failed' : pairPending ? 'waiting' : 'idle'} />{!online ? '网络已断开' : pairWaiting ? '等待电脑允许' : busy ? '正在连接' : '尚未连接'}</span></header>
     <section className="link-mobile-section link-mobile-pair-intro"><h1>连接你的电脑</h1><p>把桌面的项目和会话，接到手机上。</p></section>
     <section className="link-mobile-pair-card">
-      <div className="link-mobile-pair-symbol"><UIIcon name="link" size={28} /></div><h2>{pairUri ? '配对信息已就绪' : isNative() ? '扫码连接工作台' : '连接桌面工作台'}</h2><p>{pairUri ? '确认设备名称，发送连接请求。' : isNative() ? '在电脑「远程连接」中点击「连接手机」，再扫描电脑上的二维码。' : '在电脑「远程连接」中点击「连接手机」，在下方粘贴配对码。'}</p>
-      <label className="link-mobile-field" htmlFor="pair-name"><span>这台设备的名称</span><input id="pair-name" autoComplete="off" maxLength={128} value={name} onChange={e => setName(e.target.value)} placeholder="我的手机" /></label>
+      <div className="link-mobile-pair-symbol"><UIIcon name="link" size={28} /></div><h2>{pairWaiting ? '请在电脑上允许连接' : busy ? '正在发送连接请求…' : pairUri ? '连接工作台' : isNative() ? '扫码连接工作台' : '连接桌面工作台'}</h2><p>{pairWaiting ? '请求已发送，无需再次扫码或点击连接。' : busy ? '正在连接电脑，请稍候。' : pairUri ? '扫码后自动连接，仅需电脑确认。' : isNative() ? '在电脑「远程连接」中点击「连接手机」，再扫描电脑上的二维码。' : '在电脑「远程连接」中点击「连接手机」，在下方粘贴配对码。'}</p>
+      <label className="link-mobile-field" htmlFor="pair-name"><span>这台设备的名称</span><input id="pair-name" autoComplete="off" maxLength={100} value={name} disabled={pairPending} onChange={e => setName(e.target.value)} placeholder="我的手机" /></label>
+      {pairDetails?.code && <div className="link-mobile-pair-details"><span>连接电脑</span><strong>{new URL(pairDetails.url).host}</strong><label className="link-mobile-field" htmlFor="pair-code"><span>已识别配对码</span><input id="pair-code" aria-label="已识别配对码" value={pairDetails.code} readOnly onFocus={event => event.target.select()} /></label></div>}
       {isNative() && !pairUri && <button className="link-mobile-scan-button" onClick={scan} disabled={busy}><UIIcon name="scan" size={21} />扫描桌面二维码</button>}
-      {(pairUri || !isNative()) && <Button kind="primary" onClick={pair} disabled={!pairUri.trim() || busy || pairState === 'pending'}>{busy ? '正在连接…' : pairState === 'pending' ? '等待电脑允许…' : error ? '重新连接工作台' : '连接工作台'}</Button>}
-      {isNative() && pairUri && <Button icon="scan" onClick={scan} disabled={busy}>重新扫码</Button>}
-      {pairState && <div className={'link-mobile-pair-feedback ' + (pairState === 'pending' ? '' : 'is-warning')} role="status"><StatusDot state={pairState === 'pending' ? 'waiting' : pairState === 'approved' ? 'running' : 'failed'} /><div><strong>{pairState === 'pending' ? runtime.isPreview ? '模拟连接：等待演示授权' : '请在电脑上允许连接' : pairState === 'rejected' ? '电脑未允许这次连接' : pairState === 'expired' ? '配对码已过期' : '已确认'}</strong><p>{pairState === 'pending' ? runtime.isPreview ? '点击本页顶部「模拟电脑允许」继续，真实电脑不会出现请求。' : '打开电脑的「远程连接」，确认设备名称后点击「允许」。' : '请在电脑上生成新的二维码，再重新扫码。'}</p></div></div>}
+      {(pairUri || !isNative()) && !pairTerminal && <Button kind="primary" onClick={pair} disabled={!pairUri.trim() || pairPending}>{busy ? '正在连接…' : pairWaiting ? '等待电脑允许…' : error ? '重试连接' : '连接工作台'}</Button>}
+      {isNative() && pairUri && !pairPending && <Button icon="scan" onClick={scan}>重新扫码</Button>}
+      {pairState && <div className={'link-mobile-pair-feedback ' + (pairWaiting ? '' : 'is-warning')} role="status"><StatusDot state={pairWaiting ? 'waiting' : pairState === 'approved' ? 'running' : 'failed'} /><div><strong>{pairWaiting ? runtime.isPreview ? '模拟连接：等待演示授权' : '请在电脑上允许连接' : pairState === 'rejected' ? '电脑未允许这次连接' : pairState === 'expired' ? '配对码已过期' : '已确认'}</strong><p>{pairWaiting ? runtime.isPreview ? '点击本页顶部「模拟电脑允许」继续，真实电脑不会出现请求。' : '打开电脑的「远程连接」，确认设备名称后点击「允许」。' : '请在电脑上生成新的二维码，再重新扫码。'}</p></div></div>}
       {error && <div className="link-mobile-pair-feedback is-warning"><ErrorText>{connectionError(error, isNative() && !!identity?.pin)}</ErrorText></div>}
     </section>
-    <details className="link-mobile-backup" open={!isNative() || undefined}><summary>无法扫码？使用配对地址<UIIcon name="chevronDown" size={16} /></summary><form onSubmit={pair}><label className="link-mobile-field" htmlFor="pair-uri"><span>{isNative() ? '完整配对地址' : '一次性配对码或完整配对地址'}</span><textarea id="pair-uri" value={pairUri} onChange={e => updatePairUri(e.target.value)} placeholder={isNative() ? '粘贴电脑复制的 dshlink://pair?…' : '粘贴电脑提供的配对码或链接'} rows="3" spellCheck="false" /></label><Button type="submit" disabled={!pairUri.trim() || busy || pairState === 'pending'}>使用地址连接</Button></form></details>
+    <details className="link-mobile-backup" open={!isNative() || undefined}><summary>使用配对地址<UIIcon name="chevronDown" size={16} /></summary><form onSubmit={pair}><label className="link-mobile-field" htmlFor="pair-uri"><span>{isNative() ? '完整配对地址' : '一次性配对码或完整配对地址'}</span><textarea id="pair-uri" value={pairUri} disabled={pairPending} onChange={e => updatePairUri(e.target.value)} placeholder={isNative() ? '粘贴电脑复制的 dshlink://pair?…' : '粘贴电脑提供的配对码或链接'} rows="3" spellCheck="false" /></label><Button type="submit" disabled={!pairUri.trim() || pairPending || pairTerminal}>使用地址连接</Button></form></details>
     <div className="link-mobile-network-note"><UIIcon name="check" size={17} /><p>{isNative() ? '手机与电脑在同一 Wi-Fi 下可直接连接，无需公网。不同网络需使用可访问的 HTTPS 地址。' : '当前通过 HTTPS 连接工作台。浏览器使用电脑提供的同源配对页；Android App 也可在同一 Wi-Fi 内直连。'}</p></div>
   </main>;
 
@@ -191,7 +216,7 @@ export function LinkMobileApp({ runtime = nativeRuntime, theme: controlledTheme,
   };
   const currentSession = state?.sessions?.find(item => item.id === session?.id) || session;
   const mainTitle = screen === 'chat' ? currentSession?.title || '新会话' : screen === 'new' ? '新会话' : screen === 'connection' ? '连接管理' : '最近';
-  const mainSubtitle = screen === 'chat' ? (project?.name || '工作区') + (history.running ? ' · 正在处理' : '') : state?.host?.name || 'Harness Plus';
+  const mainSubtitle = screen === 'chat' ? (project?.name || '工作区') + (history.running ? ' · 正在处理' : '') : state?.host?.name || '小角';
   return <main ref={viewportRef} className={'link-mobile link-mobile-v3 link-mobile-shell' + (screen === 'chat' ? ' link-mobile-chat' : '')} data-theme={theme}>
     <div className="link-app-content" inert={sidebarOpen ? '' : undefined} aria-hidden={sidebarOpen || undefined}>
       <header className="link-app-header"><button className="link-mobile-icon-button" aria-label="打开侧边栏" aria-controls="link-mobile-sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><UIIcon name="collapse" className="link-sidebar-open-icon" size={22} /></button><div className="link-app-heading"><strong>{mainTitle}</strong><small><StatusDot state={connectionState} />{mainSubtitle}</small></div><button className="link-mobile-icon-button" aria-label="新建会话" onClick={openNew} disabled={busy || !!sendPending}><UIIcon name="edit" size={21} /></button></header>
@@ -216,5 +241,5 @@ export function LinkMobileApp({ runtime = nativeRuntime, theme: controlledTheme,
     {sidebarOpen && <MobileSidebar state={state} screen={screen} selectedId={session?.id} onChoose={choose} onNavigate={navigate} onNew={openNew} onClose={closeSidebar} connectionLabel={connectionLabel} connectionState={connectionState} theme={theme} onTheme={() => setTheme(value => value === 'light' ? 'dark' : 'light')} disabled={busy || !!sendPending} />}
   </main>;
 }
-function Brand() { return <div className="link-mobile-brand"><BrandLogo size={28} decorative /><span>DSH-Plus</span></div>; }
+function Brand() { return <div className="link-mobile-brand"><BrandLogo size={28} decorative /><span>小角</span></div>; }
 function connectionError(message, lan) { if (/[\u3400-\u9fff]/.test(message) || !/failed to connect|timeout|timed out|unreachable/i.test(message)) return message; return lan ? '暂时无法连接电脑。请确认手机和电脑在同一 Wi-Fi，电脑已开启 Link；检查防火墙后可重新连接。' : '暂时无法连接工作台。请确认 HTTPS 地址可从手机访问，并检查服务状态、域名证书与网络转发后重试。'; }

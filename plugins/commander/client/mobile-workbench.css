@@ -60,7 +60,11 @@
   .cmd-shell-frame > :nth-child(2) { min-width: 0; grid-column: 2; grid-row: 1; }
   .cmd-shell-frame > [data-rightbar-col] { grid-column: 3; grid-row: 1; }
   .cmd-shell-frame [data-conversation-header-leading] { display: none; }
-  .cmd-shell-frame header:has([data-conversation-header-leading]) { padding-inline: 12px; }
+  .cmd-shell-frame header:has([data-conversation-header-leading]) {
+    padding-inline-start: max(12px, env(safe-area-inset-left, 0px));
+    padding-inline-end: max(12px, env(safe-area-inset-right, 0px));
+  }
+  .cmd-shell-frame [data-conversation-header-corner] { margin-inline-end: 0; }
   .cmd-shell-frame [data-conversation-tabs] { overflow-x: auto; scrollbar-width: none; }
   .cmd-shell-frame [data-conversation-region="composer"] {
     padding-bottom: env(safe-area-inset-bottom, 0px);

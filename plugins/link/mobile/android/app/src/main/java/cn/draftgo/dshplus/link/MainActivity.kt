@@ -31,8 +31,12 @@ private const val START_URL = "$APP_ORIGIN/assets/index.html"
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
+    private lateinit var localView: WebView
+    private lateinit var layout: android.widget.LinearLayout
+    private val workbenches = ConcurrentHashMap<String, WebView>()
     private lateinit var bridge: LinkBridge
     private var pendingBootstrap: String? = null
+    private lateinit var devicesButton: android.widget.TextView
     private var workbenchIdentity: Identity? = null
     private var microphoneRequest: android.webkit.PermissionRequest? = null
     private var uploadCallback: android.webkit.ValueCallback<Array<android.net.Uri>>? = null
@@ -57,7 +61,23 @@ class MainActivity : AppCompatActivity() {
             dispatchBootstrap(json)
         }
         webView = WebView(this)
-        setContentView(webView)
+        localView = webView
+        layout = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL; setBackgroundColor(android.graphics.Color.rgb(248, 249, 251)) }
+        val density = resources.displayMetrics.density
+        devicesButton = android.widget.TextView(this).apply {
+            text = "‹  设备"; textSize = 14f; setTextColor(android.graphics.Color.rgb(67, 91, 117))
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding((16 * density).toInt(), 0, (16 * density).toInt(), 0)
+            contentDescription = "返回本机设备列表"; visibility = android.view.View.GONE
+            setOnClickListener { returnToDevices() }
+        }
+        layout.addView(devicesButton, android.widget.LinearLayout.LayoutParams(-1, (44 * density).toInt()))
+        layout.addView(webView, android.widget.LinearLayout.LayoutParams(-1, 0, 1f))
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(layout) { view, insets ->
+            val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom); insets
+        }
+        setContentView(layout)
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
         webView.settings.allowFileAccess = false
@@ -70,6 +90,12 @@ class MainActivity : AppCompatActivity() {
         webView.addJavascriptInterface(bridge, "LinkNative")
         webView.loadUrl(START_URL)
         intent?.data?.let { handlePairUri(it.toString()) }
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (workbenchIdentity != null) returnToDevices()
+                else { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
+            }
+        })
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -81,8 +107,9 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         microphoneRequest?.deny(); uploadCallback?.onReceiveValue(null)
         bridge.close()
-        webView.removeJavascriptInterface("LinkNative")
-        webView.destroy()
+        localView.removeJavascriptInterface("LinkNative")
+        workbenches.values.forEach { it.destroy() }; workbenches.clear()
+        localView.destroy()
         super.onDestroy()
     }
 
@@ -128,6 +155,7 @@ class MainActivity : AppCompatActivity() {
     private fun dispatchBootstrap(json: String) {
         if (!::webView.isInitialized) return
         webView.post {
+            if (!webView.url.orEmpty().startsWith(START_URL)) return@post
             val encoded = JSONObject.quote(json)
             webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('link:bootstrap',{detail:$encoded}));", null)
         }
@@ -143,11 +171,46 @@ class MainActivity : AppCompatActivity() {
         }) }
     }
 
-    fun deliverResult(script: String) { webView.evaluateJavascript(script, null) }
+    fun deliverResult(script: String) { if (localView.url.orEmpty().startsWith(START_URL)) localView.evaluateJavascript(script, null) }
+    private fun showView(view: WebView) {
+        if (webView === view) return
+        layout.removeView(webView); webView = view
+        layout.addView(view, android.widget.LinearLayout.LayoutParams(-1, 0, 1f))
+    }
+    fun canOpenDevice(id: String): Boolean = workbenches.containsKey(id) || workbenches.size < 4
+    fun forgetDevice(id: String) {
+        runOnUiThread { workbenches.remove(id)?.let { view -> if (view === webView) returnToDevices(); view.destroy() } }
+    }
 
-    fun openWorkbench(identity: Identity, cookie: String) {
+    fun openWorkbench(identity: Identity, cookie: String, isCurrent: () -> Boolean) {
         runOnUiThread {
+            if (!isCurrent()) return@runOnUiThread
+            val cached = workbenches[identity.id]
+            if (cached != null && cached.tag == identity.url) {
+                android.webkit.CookieManager.getInstance().setCookie(identity.url + "/link/workbench/", cookie) { accepted ->
+                    if (!isCurrent()) return@setCookie
+                    if (accepted) {
+                        showView(cached); workbenchIdentity = identity; pendingBootstrap = null
+                        devicesButton.text = "‹  设备 · " + identity.publicJson().optString("name")
+                        devicesButton.visibility = android.view.View.VISIBLE
+                    } else workbenchFailed("无法保存工作台连接，请重试")
+                }
+                return@runOnUiThread
+            }
+            cached?.let { workbenches.remove(identity.id); it.destroy() }
+            val remote = WebView(this).apply {
+                settings.javaScriptEnabled = true; settings.domStorageEnabled = true
+                settings.allowFileAccess = false; settings.allowContentAccess = false
+                settings.setSupportMultipleWindows(false)
+                settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                tag = identity.url
+            }
+            android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(remote, false)
+            workbenches[identity.id] = remote
+            showView(remote)
             workbenchIdentity = identity
+            devicesButton.text = "‹  设备 · " + identity.publicJson().optString("name")
+            devicesButton.visibility = android.view.View.VISIBLE
             pendingBootstrap = null
             webView.removeJavascriptInterface("LinkNative")
             webView.webViewClient = workbenchClient(identity)
@@ -166,7 +229,12 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             android.webkit.CookieManager.getInstance().setCookie(identity.url + "/link/workbench/", cookie) { accepted ->
-                if (accepted) webView.loadUrl(identity.url + "/link/workbench/")
+                if (!isCurrent()) return@setCookie
+                if (accepted) {
+                    val path = getSharedPreferences("link_locations", Context.MODE_PRIVATE).getString(identity.id, "/link/workbench/") ?: "/link/workbench/"
+                    val restored = runCatching { URI(identity.url + path) }.getOrNull()
+                    remote.loadUrl(if (restored != null && restored.host == URI(identity.url).host && restored.path.startsWith("/link/workbench/") && !path.startsWith("//")) identity.url + path else identity.url + "/link/workbench/")
+                }
                 else workbenchFailed("无法保存工作台连接，请重试")
             }
         }
@@ -179,7 +247,7 @@ class MainActivity : AppCompatActivity() {
         }.getOrDefault(false)
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             if (allowed(request.url)) return false
-            if (request.url.toString() == identity.url + "/link/") { returnToPairing(); return true }
+            if (request.url.toString() == identity.url + "/link/") { returnToDevices(); return true }
             if (request.url.scheme in listOf("https", "http", "mailto")) runCatching { startActivity(Intent(Intent.ACTION_VIEW, request.url)) }
             return true
         }
@@ -197,20 +265,35 @@ class MainActivity : AppCompatActivity() {
             }.getOrDefault(false)
             if (trusted) handler.proceed() else handler.cancel()
         }
+        override fun onPageFinished(view: WebView, url: String) {
+            if (allowed(android.net.Uri.parse(url))) {
+                val target = URI(url)
+                val path = target.rawPath + (target.rawQuery?.let { "?" + it } ?: "") + (target.rawFragment?.let { "#" + it } ?: "")
+                getSharedPreferences("link_locations", Context.MODE_PRIVATE).edit().putString(identity.id, path).apply()
+            }
+        }
         override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
-            if (request.isForMainFrame && response.statusCode == 401) returnToPairing()
+            if (request.isForMainFrame && response.statusCode == 401) {
+                if (view === webView) returnToDevices()
+                workbenches.remove(identity.id, view); view.destroy()
+            }
         }
     }
 
-    private fun returnToPairing() {
-        bridge.clearIdentity()
+    private fun returnToDevices() {
+        bridge.showDevices()
+        pendingBootstrap = null
+        showView(localView)
+        devicesButton.visibility = android.view.View.GONE
+        microphoneRequest?.deny(); microphoneRequest = null
+        uploadCallback?.onReceiveValue(null); uploadCallback = null
         workbenchIdentity = null; webView.stopLoading()
         webView.webViewClient = localClient(); webView.webChromeClient = android.webkit.WebChromeClient()
         webView.addJavascriptInterface(bridge, "LinkNative"); webView.loadUrl(START_URL)
     }
     fun workbenchFailed(message: String) {
         runOnUiThread {
-            if (workbenchIdentity != null) { returnToPairing(); android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show() }
+            if (workbenchIdentity != null) { returnToDevices(); android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show() }
             else webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('link:workbench-error',{detail:${JSONObject.quote(message)}}));", null)
         }
     }
@@ -220,40 +303,50 @@ class LinkBridge(private val context: MainActivity, private val onIdentity: (Str
     private val store = IdentityStore(context)
     private val executor = Executors.newFixedThreadPool(3)
     private val clients = ConcurrentHashMap<String, OkHttpClient>()
+    private val pairs = ConcurrentHashMap<String, NativePair>()
+    @Volatile private var pendingIdentity: Identity? = null
+    @Volatile private var devicesVisible = true
+    private val connectionGeneration = java.util.concurrent.atomic.AtomicLong()
+    private val servers = SshServerManager(context) { identity -> store.write(identity, false) }
+    private data class NativePair(val identity: Identity, val pollToken: String, val expiresAt: Long)
+    private fun capabilities() = JSONObject().put("devices", true).put("ssh", true)
+    fun showDevices() { connectionGeneration.incrementAndGet(); pendingIdentity = null; devicesVisible = true }
+    private fun currentIdentity() = pendingIdentity ?: store.read()
+    private fun canOpenAnother(id: String) = context.canOpenDevice(id)
 
     @JavascriptInterface
-    fun bootstrap(): String = store.read()?.toJson()?.toString() ?: "{}"
+    fun bootstrap(): String = (currentIdentity()?.toJson() ?: JSONObject()).put("showDevices", devicesVisible)
+        .put("capabilities", capabilities()).toString()
 
     @JavascriptInterface
     fun saveIdentity(raw: String): String {
         return try {
             var incoming = Identity.parse(JSONObject(raw))
-            val existing = store.read()
-            if (existing != null && existing.hostKey != incoming.hostKey) {
-                return error("该设备已信任另一台主机，请先清除设备身份")
-            }
+            val existing = store.all().firstOrNull { it.hostKey == incoming.hostKey }
             if (existing != null && existing.token.isNotEmpty() && incoming.token.isNotEmpty() && existing.token != incoming.token && incoming.code.isEmpty()) {
-                return error("缺少一次性配对码")
+                return errorJson("缺少一次性配对码")
             }
-            if (existing != null && existing.token.isNotEmpty() && incoming.token.isEmpty() && incoming.code.isEmpty()) {
-                incoming = incoming.copy(token = existing.token, code = existing.code)
-            }
-            store.write(incoming)
-            onIdentity(incoming.toJson().toString())
+            if (existing != null && incoming.token.isEmpty() && incoming.code.isEmpty()) incoming = incoming.copy(token = existing.token)
+            if (existing != null) incoming = incoming.copy(id = existing.id, kind = existing.kind, ssh = existing.ssh)
+            if (incoming.token.isNotEmpty()) { store.write(incoming); pendingIdentity = null } else pendingIdentity = incoming
+            connectionGeneration.incrementAndGet(); devicesVisible = false
+            onIdentity(bootstrap())
             JSONObject().put("ok", true).toString()
-        } catch (e: Exception) { error(e.message ?: "无效的配对信息") }
+        } catch (e: Exception) { errorJson(e.message ?: "无效的配对信息") }
     }
 
     @JavascriptInterface
-    fun clearIdentity(): String { store.clear(); return JSONObject().put("ok", true).toString() }
+    fun clearIdentity(): String { showDevices(); return JSONObject().put("ok", true).toString() }
 
     @JavascriptInterface
     fun scan(): String { context.launchScanner(); return JSONObject().put("ok", true).toString() }
 
     @JavascriptInterface
     fun openWorkbench(): String {
-        val identity = store.read() ?: return error("请先配对工作台")
-        if (identity.token.isEmpty()) return error("请先在电脑上允许连接")
+        val identity = store.read() ?: return errorJson("请先配对工作台")
+        if (identity.token.isEmpty()) return errorJson("请先在电脑上允许连接")
+        if (!canOpenAnother(identity.id)) return errorJson("已保留 4 个工作台，请先关闭暂不用的设备页面")
+        val generation = connectionGeneration.get()
         executor.execute {
             runCatching {
                 val client = clientFor(identity)
@@ -263,11 +356,90 @@ class LinkBridge(private val context: MainActivity, private val onIdentity: (Str
                     require(result.isSuccessful) { body.optString("error", "工作台连接失败") }
                     require(body.optString("url") == "/link/workbench/") { "工作台地址无效" }
                     val cookie = result.headers.values("Set-Cookie").singleOrNull { it.contains("Path=/link/workbench/", true) && it.contains("HttpOnly", true) } ?: throw IllegalStateException("工作台未返回设备会话")
-                    context.openWorkbench(identity, cookie)
+                    if (generation == connectionGeneration.get() && store.selectedId() == identity.id) context.openWorkbench(identity, cookie) { generation == connectionGeneration.get() && store.selectedId() == identity.id }
                 }
-            }.onFailure { context.workbenchFailed(connectionFailureMessage(it, identity.url, identity.pin.isNotEmpty())) }
+            }.onFailure { if (generation == connectionGeneration.get()) context.workbenchFailed(connectionFailureMessage(it, identity.url, identity.pin.isNotEmpty())) }
         }
         return JSONObject().put("ok", true).toString()
+    }
+
+    @JavascriptInterface
+    fun deviceCall(raw: String): String {
+        val input = runCatching { JSONObject(raw) }.getOrNull() ?: return errorJson("无效的设备请求")
+        val requestId = input.optString("id")
+        executor.execute {
+            val result = try { JSONObject().put("ok", true).put("body", deviceAction(input)).toString() }
+                catch (error: Exception) { errorJson(error.message ?: "设备操作失败") }
+            context.runOnUiThread { context.deliverResult("window.__linkNativeResult && window.__linkNativeResult(" + JSONObject.quote(requestId) + "," + JSONObject.quote(result) + ");") }
+        }
+        return ""
+    }
+
+    private fun deviceAction(input: JSONObject): JSONObject {
+        val targetId = input.optString("deviceId").ifBlank { input.optString("targetId") }
+        return when (input.optString("action")) {
+            "list" -> JSONObject().put("devices", org.json.JSONArray(store.all().map {
+                it.publicJson(if (it.kind == "ssh") servers.status(it.id) else "unknown")
+            })).put("activeId", store.selectedId()).put("capabilities", capabilities())
+            "select" -> {
+                val identity = store.get(targetId) ?: error("设备不存在")
+                require(identity.kind != "ssh" || servers.status(identity.id) == "connected") { "SSH 隧道已断开，请重新连接" }
+                require(canOpenAnother(identity.id)) { "已保留 4 个工作台，请先关闭暂不用的设备页面" }
+                connectionGeneration.incrementAndGet(); store.select(identity.id); pendingIdentity = null; devicesVisible = false
+                val launched = JSONObject(openWorkbench()); require(launched.optBoolean("ok")) { launched.optString("error") }
+                JSONObject().put("device", identity.publicJson())
+            }
+            "closeWorkbench" -> { context.forgetDevice(targetId); JSONObject().put("ok", true) }
+            "rename" -> {
+                val identity = store.get(targetId) ?: error("设备不存在")
+                val name = input.optString("name").trim(); require(name.isNotBlank() && name.length <= 128) { "设备名称须为 1–128 字" }
+                val renamed = identity.copy(name = name); store.write(renamed, false)
+                JSONObject().put("device", renamed.publicJson())
+            }
+            "remove" -> {
+                if (store.selectedId() == targetId) showDevices()
+                store.remove(targetId); servers.remove(targetId); context.forgetDevice(targetId)
+                context.getSharedPreferences("link_locations", Context.MODE_PRIVATE).edit().remove(targetId).apply()
+                JSONObject().put("ok", true)
+            }
+            "pair" -> {
+                pairs.entries.removeIf { it.value.expiresAt <= System.currentTimeMillis() }
+                require(pairs.size < 16) { "待批准连接过多" }
+                val parsed = parsePairingLink(input.optString("uri"))
+                val identity = Identity(parsed.url, parsed.pin, parsed.code, input.optString("name").trim().ifBlank { parsed.name.ifBlank { "电脑" } }.take(100), "")
+                val pair = post(identity, "/link/api/pair", JSONObject().put("code", identity.code).put("name", identity.name))
+                pairs[pair.getString("requestId")] = NativePair(identity, pair.getString("pollToken"), pair.optLong("expiresAt", System.currentTimeMillis() + 300000))
+                JSONObject().put("requestId", pair.getString("requestId"))
+            }
+            "pairStatus" -> {
+                val id = input.optString("requestId"); val pair = pairs[id] ?: error("配对请求已过期")
+                val result = post(pair.identity, "/link/api/pair/status", JSONObject().put("requestId", id).put("pollToken", pair.pollToken))
+                if (result.optString("status") == "approved") {
+                    val previous = store.all().firstOrNull { it.hostKey == pair.identity.hostKey }
+                    val device = pair.identity.copy(token = result.getString("token"), code = "", id = previous?.id ?: pair.identity.id)
+                    store.write(device, false); pairs.remove(id)
+                    JSONObject().put("status", "approved").put("device", device.publicJson())
+                } else { if (result.optString("status") == "rejected") pairs.remove(id); JSONObject().put("status", result.optString("status")) }
+            }
+            "sshProbe" -> servers.probe(input)
+            "sshConnect" -> servers.connect(input)
+            "job" -> servers.job(input.optString("jobId").ifBlank { input.optString("targetId") })
+            "reconnect" -> {
+                val identity = store.get(targetId) ?: error("设备不存在")
+                require(identity.kind == "ssh") { "该设备不是 SSH 服务器" }
+                servers.connect(input, identity)
+            }
+            "serverAction" -> servers.manage(input, store.get(targetId) ?: error("设备不存在"))
+            else -> error("不支持的设备操作")
+        }
+    }
+
+    private fun post(identity: Identity, path: String, body: JSONObject): JSONObject {
+        val request = Request.Builder().url(identity.url + path).post(body.toString().toRequestBody("application/json".toMediaType())).build()
+        return clientFor(identity).newCall(request).execute().use { response ->
+            val value = JSONObject(response.body?.string() ?: "{}")
+            require(response.isSuccessful) { value.optString("error", "连接失败（HTTP " + response.code + "）") }; value
+        }
     }
 
     @JavascriptInterface
@@ -283,7 +455,7 @@ class LinkBridge(private val context: MainActivity, private val onIdentity: (Str
         return ""
     }
 
-    private fun clientFor(identity: Identity): OkHttpClient = clients.getOrPut(identity.hostKey) {
+    internal fun clientFor(identity: Identity): OkHttpClient = clients.getOrPut(identity.hostKey) {
             val uri = URI(identity.url)
             val builder = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
                 .connectTimeout(12, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS)
@@ -325,7 +497,7 @@ class LinkBridge(private val context: MainActivity, private val onIdentity: (Str
             val input = JSONObject(raw)
             val id = input.optString("id")
             requestId = id
-            val identity = store.read() ?: return response(id, 0, "未配对")
+            val identity = currentIdentity() ?: return response(id, 0, "未配对")
             hostUrl = identity.url
             pinned = identity.pin.isNotEmpty()
             val method = input.optString("method").uppercase()
@@ -351,57 +523,12 @@ class LinkBridge(private val context: MainActivity, private val onIdentity: (Str
         put("id", id); put("ok", status in 200..299); put("status", status)
         if (status == 0) put("error", body) else put("body", runCatching { org.json.JSONTokener(body).nextValue() }.getOrDefault(body))
     }.toString()
-    private fun error(message: String) = JSONObject().put("ok", false).put("status", 0).put("error", message).toString()
+    private fun errorJson(message: String) = JSONObject().put("ok", false).put("status", 0).put("error", message).toString()
     fun close() {
+        connectionGeneration.incrementAndGet()
+        servers.close()
         executor.shutdownNow()
         clients.values.forEach { it.dispatcher.executorService.shutdownNow(); it.connectionPool.evictAll() }
         clients.clear()
     }
-}
-
-data class Identity(val url: String, val pin: String, val code: String, val name: String, val token: String) {
-    val hostKey: String get() = "$url|$pin"
-    fun toJson() = JSONObject().apply { put("url", url); put("pin", pin); put("code", code); put("name", name); put("token", token) }
-    companion object {
-        fun parse(json: JSONObject): Identity {
-            val url = json.optString("url").trim().trimEnd('/')
-            val uri = URI(url)
-            require(uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null && uri.query == null && uri.fragment == null && (uri.path.isNullOrEmpty() || uri.path == "/")) { "配对地址必须是 HTTPS 主机地址" }
-            val pin = json.optString("pin").trim().removePrefix("sha256/")
-            if (pin.isNotEmpty()) require(runCatching { Base64.getDecoder().decode(pin).size == 32 }.getOrDefault(false)) { "SPKI pin 无效" }
-            val code = json.optString("code").trim()
-            require(code.length <= 256) { "一次性配对码无效" }
-            val token = json.optString("token").trim()
-            require(token.length <= 4096) { "令牌过长" }
-            require(code.isNotEmpty() || token.isNotEmpty()) { "缺少配对码或设备令牌" }
-            return Identity(url, pin, code, json.optString("name").take(128), token)
-        }
-    }
-}
-
-private class IdentityStore(context: Context) {
-    private val prefs = context.getSharedPreferences("link_identity", Context.MODE_PRIVATE)
-    private val alias = "dsh-plus-link-identity"
-
-    fun write(identity: Identity) {
-        val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        val key = if (keyStore.containsAlias(alias)) keyStore.getKey(alias, null) as javax.crypto.SecretKey else {
-            val generator = javax.crypto.KeyGenerator.getInstance("AES", "AndroidKeyStore")
-            generator.init(android.security.keystore.KeyGenParameterSpec.Builder(alias, android.security.keystore.KeyProperties.PURPOSE_ENCRYPT or android.security.keystore.KeyProperties.PURPOSE_DECRYPT)
-                .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE).build())
-            generator.generateKey()
-        }
-        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding").apply { init(javax.crypto.Cipher.ENCRYPT_MODE, key) }
-        val encoded = Base64.getEncoder().encodeToString(cipher.iv + cipher.doFinal(identity.toJson().toString().toByteArray()))
-        prefs.edit().putString("value", encoded).apply()
-    }
-    fun read(): Identity? = runCatching {
-        val raw = prefs.getString("value", null) ?: return null
-        val bytes = Base64.getDecoder().decode(raw)
-        val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        val key = keyStore.getKey(alias, null) as javax.crypto.SecretKey
-        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding").apply { init(javax.crypto.Cipher.DECRYPT_MODE, key, javax.crypto.spec.GCMParameterSpec(128, bytes.copyOfRange(0, 12))) }
-        Identity.parse(JSONObject(String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)))))
-    }.getOrNull()
-    fun clear() { prefs.edit().clear().apply(); runCatching { java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(alias) } } }
 }

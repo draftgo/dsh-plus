@@ -1,0 +1,272 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "DSH-Plus 本机设备中心",
+    "version": "1.0.0",
+    "description": "本机 owner 使用 launch 一次性入口获取私有会话路径。设备 token、SSH 密码和私钥不在公开响应暴露。MCP delegation 不变，不开放 Agent 设备切换或 SSH 工具。"
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:{port}/s/{session}",
+      "variables": {
+        "port": {
+          "default": "0",
+          "description": "运行时分配环回端口"
+        },
+        "session": {
+          "default": "REDACTED",
+          "description": "一次性入口签发的私有会话路径"
+        }
+      }
+    }
+  ],
+  "paths": {
+    "/api/devices": {
+      "post": {
+        "summary": "设备保存、配对、切换与服务器管理",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "list:{devices,activeId,capabilities}; pair:{requestId,expiresAt}; pairStatus:{status,device?}; select:{device,url}; sshProbe:{fingerprint}; sshConnect/reconnect/update:{jobId}; job:{id,state,steps,device?,error?}; serverAction:{operation,status?,logs?}"
+          },
+          "400": {
+            "description": "输入错误或操作失败"
+          },
+          "401": {
+            "description": "身份或入口过期"
+          },
+          "403": {
+            "description": "来源未授权"
+          }
+        },
+        "description": "请求 Origin 必须等于设备中心源。sshProbe 不发送认证，sshConnect 必须包含用户确认的原始 SHA256 fingerprint。select 返回一次性工作台 URL。移除只删除本机连接，不卸载服务器。 Android 原生还支持 closeWorkbench 关闭本机页面；Node 由前端关闭 iframe。Android 任务终态为 completed/failed。"
+      }
+    },
+    "/api/commander-devices": {
+      "servers": [
+        {
+          "url": "/"
+        }
+      ],
+      "post": {
+        "summary": "官方 owner 通道：打开本机设备中心",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "action"
+                ],
+                "properties": {
+                  "action": {
+                    "const": "launch"
+                  },
+                  "parentOrigin": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "操作成功"
+          },
+          "400": {
+            "description": "输入错误或操作失败"
+          },
+          "401": {
+            "description": "身份或入口过期"
+          },
+          "403": {
+            "description": "来源未授权"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "DeviceRequest": {
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "enum": [
+              "list",
+              "pair",
+              "pairStatus",
+              "select",
+              "rename",
+              "remove",
+              "sshProbe",
+              "sshConnect",
+              "job",
+              "reconnect",
+              "serverAction"
+            ]
+          },
+          "deviceId": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "uri": {
+            "type": "string",
+            "format": "uri"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "default": 22
+          },
+          "username": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "writeOnly": true
+          },
+          "privateKey": {
+            "type": "string",
+            "writeOnly": true
+          },
+          "passphrase": {
+            "type": "string",
+            "writeOnly": true
+          },
+          "source": {
+            "enum": [
+              "mirror",
+              "github"
+            ],
+            "default": "mirror"
+          },
+          "operation": {
+            "enum": [
+              "status",
+              "start",
+              "stop",
+              "restart",
+              "logs",
+              "update"
+            ]
+          }
+        }
+      },
+      "Device": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "local",
+              "computer",
+              "ssh"
+            ]
+          },
+          "url": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "unknown",
+              "online",
+              "offline"
+            ]
+          },
+          "lastError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "warning": {
+            "type": "string"
+          }
+        }
+      },
+      "Job": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "done",
+              "error"
+            ]
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "state": {
+                  "enum": [
+                    "running",
+                    "done",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "device": {
+            "$ref": "#/components/schemas/Device"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

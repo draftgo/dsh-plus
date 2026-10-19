@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { request as tlsRequest } from 'node:https';
+import { connect as connectHttp2 } from 'node:http2';
 import { openStore } from '../src/pairing/store.mjs';
 import { loadIdentity } from '../src/transport/tls.mjs';
 import { createWorkbench } from '../src/transport/workbench.mjs';
@@ -50,6 +51,50 @@ async function setup(t) {
   t.after(async () => { await server.close(); await store.flush(); await rm(directory, { recursive: true, force: true }); });
   return f;
 }
+
+test('one HTTP/2 connection carries eight subscriptions plus session navigation and uplinks', { timeout: 20_000 }, async t => {
+  const f = await setup(t), cookie = await login(f);
+  const client = connectHttp2(`https://localhost:${f.server.port}`, { ca: f.identity.cert, lookup: (_host, options, callback) => options.all ? callback(null, [{ address: '127.0.0.1', family: 4 }]) : callback(null, '127.0.0.1', 4) });
+  t.after(() => client.destroy());
+  await new Promise((resolve, reject) => { client.once('connect', resolve); client.once('error', reject); });
+  assert.equal(client.socket.alpnProtocol, 'h2');
+  const active = [];
+  const streams = await Promise.all(Array.from({ length: 8 }, (_, index) => new Promise((resolve, reject) => {
+    const request = client.request({ ':method': 'POST', ':path': '/link/workbench/remote/open', cookie, 'content-type': 'application/json' });
+    let buffer = '';
+    request.setEncoding('utf8'); request.on('error', reject);
+    request.on('data', chunk => { buffer += chunk; if (buffer.includes('\n')) resolve({ request, get text() { return buffer; } }); });
+    request.end(JSON.stringify({ id: 'subscription-' + index, endpoint: 'fixture/echo', payload: { args: {} } }));
+    active.push(request);
+  })));
+  t.after(() => { for (const request of active) request.close(); });
+  assert.equal(f.opened.length, 8);
+  const send = (path, body, headers = {}) => new Promise((resolve, reject) => {
+    const request = client.request({ ':method': 'POST', ':path': path, cookie, 'content-type': 'application/json', ...headers });
+    let status, buffer = '';
+    request.on('response', headers => { status = headers[':status']; });
+    request.setEncoding('utf8'); request.on('data', chunk => { buffer += chunk; }); request.on('error', reject);
+    request.on('end', () => resolve({ status, value: JSON.parse(buffer) })); request.end(JSON.stringify(body));
+  });
+  const navigation = await send('/link/workbench/api/session/get', { id: 'selected-session' });
+  assert.equal(navigation.status, 200);
+  assert.deepEqual(f.calls.at(-1).body, { id: 'selected-session' });
+  const updates = await send('/link/workbench/api/commander-updates', { action: 'status' });
+  assert.equal(updates.status, 200);
+  const forged = await send('/link/workbench/api/session/get', {}, { ':authority': 'evil.example' });
+  assert.equal(forged.status, 403);
+  assert.equal((await send('/link/workbench/api/session/get', {}, { ':authority': `localhost:${f.server.port}`, host: 'evil.example' })).status, 403);
+  assert.equal((await send('/link/workbench/api/session/get', {}, { origin: 'https://evil.example' })).status, 403);
+  for (let index = 0; index < streams.length; index++) {
+    assert.equal((await send('/link/workbench/remote/uplink', { id: 'subscription-' + index, type: 'item', value: { session: index } })).status, 200);
+    const end = new Promise((resolve, reject) => { streams[index].request.once('end', resolve); streams[index].request.once('error', reject); });
+    assert.equal((await send('/link/workbench/remote/uplink', { id: 'subscription-' + index, type: 'end' })).status, 200);
+    await end;
+    const frames = streams[index].text.trim().split('\n').map(JSON.parse);
+    assert.deepEqual(frames, [{ type: 'ready' }, { type: 'item', value: { received: { session: index } } }, { type: 'end' }]);
+  }
+  assert.equal((await f.call('/link/api/info', { method: 'GET' })).status, 200, 'HTTP/1.1 clients remain compatible');
+});
 async function login(f) {
   const result = await f.call('/link/api/workbench', { token: f.token });
   assert.equal(result.status, 200); assert.equal(result.value.url, '/link/workbench/');

@@ -1,7 +1,7 @@
 {
   "name": "dsh-plus",
   "displayName": "DSH-Plus",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "type": "module",
   "description": "DSH-Plus native coding agents, shared projects, voice and enhanced Harness UI",
@@ -26,6 +26,7 @@
     "config/routergo-deepseek.example.yml",
     "README.md",
     "TOOL-CONFIG.md",
+    "openapi.json",
     "VERIFICATION.md",
     "lib",
     "assets/fonts/web",
@@ -96,6 +97,7 @@
     "smol-toml": "1.9.0",
     "tar": "7.5.22",
     "ws": "8.19.0",
-    "yaml": "2.9.0"
+    "yaml": "2.9.0",
+    "ssh2": "1.17.0"
   }
 }

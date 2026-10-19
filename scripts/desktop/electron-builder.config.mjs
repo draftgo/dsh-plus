@@ -17,10 +17,10 @@ config.extraMetadata.name = 'dsh-plus-desktop';
 config.extraMetadata.version = version;
 config.extraMetadata.dshDesktopUpdateChannel = 'latest';
 config.extraMetadata.description = 'DeepSeek Harness with DSH-Plus, Voice and Link';
-config.productName = 'DSH-Plus';
-config.executableName = 'DSH-Plus';
-config.protocols = [{ name: 'DSH-Plus', schemes: ['dsh'] }];
-config.artifactName = `dsh-plus-${version}-win-x64-setup.exe`;
+config.productName = '小角';
+config.executableName = '小角';
+config.protocols = [{ name: '小角', schemes: ['dsh'] }];
+config.artifactName = `xiaojiao-${version}-win-x64-setup.exe`;
 config.directories.output = `${root}/artifacts/windows`;
 const brandOutput = `${root}/.local/desktop/brand`;
 const officialBeforeBuild = config.beforeBuild;
@@ -59,5 +59,7 @@ config.afterPack = async context => {
   }
 };
 config.publish = [{ provider: 'generic', url: 'https://ghfast.top/https://github.com/draftgo/dsh-plus/releases/download/app-updates/', channel: 'latest' }];
+config.nsis.shortcutName = '小角';
+config.nsis.uninstallDisplayName = '小角 ${version}';
 config.nsis.include = `${root}/.local/desktop/installer-plus.nsh`;
 export default config;

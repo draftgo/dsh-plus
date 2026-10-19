@@ -1,6 +1,6 @@
 /* Installed before the shared Harness shell. The paired cookie is HttpOnly. */
 (() => {
-  const base = new URL('/link/workbench/', location.href);
+  const base = new URL(document.baseURI);
   const originalFetch = globalThis.fetch.bind(globalThis);
   const route = path => new URL(path, base);
   const apiFetch = (input, init = {}) => {
@@ -13,6 +13,46 @@
       return response;
     });
   };
+  // Loopback HTTP cannot negotiate h2; multiplex subscriptions over one socket.
+  let localSocket;
+  const localStreams = new Map();
+  const localConnection = () => {
+    if (localSocket && localSocket.readyState <= 1) return localSocket;
+    const url = new URL('../../socket', base); url.protocol = 'ws:';
+    const socket = localSocket = new WebSocket(url);
+    socket.addEventListener('message', event => {
+      try { const frame = JSON.parse(event.data), stream = localStreams.get(frame.id); if (!stream) return; if (stream.items.length >= 128) { stream.error = new Error('工作台流消费过慢'); socket.close(); } else { stream.items.push(frame); stream.wake?.(); } } catch { socket.close(); }
+    });
+    socket.addEventListener('close', () => { for (const stream of localStreams.values()) { stream.error = new Error('主机连接已断开，请重试'); stream.wake?.(); } });
+    socket.addEventListener('error', () => {});
+    return socket;
+  };
+  const waitSocket = (socket, signal) => new Promise((resolve, reject) => {
+    const clean = () => { socket.removeEventListener('open', opened); socket.removeEventListener('close', failed); signal.removeEventListener('abort', failed); };
+    const opened = () => { clean(); resolve(); }, failed = () => { clean(); reject(signal.reason || new Error('主机连接不可用')); };
+    if (signal.aborted || socket.readyState > 1) return failed();
+    if (socket.readyState === 1) return opened();
+    socket.addEventListener('open', opened, { once: true }); socket.addEventListener('close', failed, { once: true }); signal.addEventListener('abort', failed, { once: true });
+  });
+  async function* localLines(payload, signal) {
+    const socket = localConnection(), stream = { items: [], wake: undefined, error: null }, id = payload.id;
+    await waitSocket(socket, signal); localStreams.set(id, stream);
+    const abort = () => { stream.error = signal.reason || new Error('已取消'); stream.wake?.(); };
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+    socket.send(JSON.stringify({ type: 'open', id, body: payload }));
+    try {
+      while (true) {
+        if (stream.error) throw stream.error;
+        if (!stream.items.length) { await new Promise(resolve => { stream.wake = resolve; }); stream.wake = undefined; continue; }
+        const frame = stream.items.shift();
+        if (frame.type === 'headers' && frame.status >= 400) { if (frame.status === 401) globalThis.dispatchEvent(new CustomEvent('dsh-link-authorization-expired')); throw new Error('工作台连接失败：' + frame.status); }
+        if (frame.type === 'error') throw new Error(frame.error);
+        if (frame.type === 'end') return;
+        if (frame.type === 'data') yield frame.value;
+      }
+    } finally { signal.removeEventListener('abort', abort); localStreams.delete(id); if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'cancel', id })); }
+  }
   async function* lines(response) {
     const reader = response.body?.getReader();
     if (!reader) throw new Error('工作台流不可用');
@@ -38,9 +78,12 @@
     };
     let upload, iterator, failure;
     try {
-      const response = await apiFetch(route('remote/open'), { method: 'POST', signal: combined, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, endpoint, payload }) });
-      if (!response.ok) throw new Error('工作台连接失败：' + response.status);
-      iterator = lines(response)[Symbol.asyncIterator]();
+      if (globalThis.__DSH_LINK_LOCAL_PROXY__) iterator = localLines({ id, endpoint, payload }, combined)[Symbol.asyncIterator]();
+      else {
+        const response = await apiFetch(route('remote/open'), { method: 'POST', signal: combined, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, endpoint, payload }) });
+        if (!response.ok) throw new Error('工作台连接失败：' + response.status);
+        iterator = lines(response)[Symbol.asyncIterator]();
+      }
       const ready = await iterator.next();
       if (ready.done || ready.value.type !== 'ready') throw new Error('工作台流初始化失败');
       upload = (async () => {

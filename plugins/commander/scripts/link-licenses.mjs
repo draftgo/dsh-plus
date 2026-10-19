@@ -16,7 +16,7 @@ async function visit(name, from = resolve) {
   for (const dependency of Object.keys(record.dependencies ?? {})) await visit(dependency, local);
 }
 export async function writeLinkLicenses(output) {
-  for (const name of ['selfsigned', 'react', 'react-dom', 'qrcode']) await visit(name);
+  for (const name of ['selfsigned', 'react', 'react-dom', 'qrcode', 'ssh2', 'ws']) await visit(name);
   await mkdir(output, { recursive: true });
   await writeFile(new URL('LINK-THIRD-PARTY-LICENSES.txt', output), [...collected.values()].join('\n\n====================\n\n') + '\n');
 }

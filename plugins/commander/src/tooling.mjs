@@ -32,6 +32,11 @@ export async function mountTooling(ctx, commander, providers, options = {}) {
     }
     yield* next();
   });
+  const installSource = input => {
+    const source = input.source === undefined ? 'mirror' : input.source;
+    if (!['mirror', 'official'].includes(source)) throw Error('请选择国内加速或官方直连下载源');
+    return { source };
+  };
   const dispatch = async (input, signal) => {
     switch (input.action) {
       case 'pickerCatalog': return pickerCatalog.list();
@@ -40,9 +45,9 @@ export async function mountTooling(ctx, commander, providers, options = {}) {
       case 'providers': return { providers: await providers.list() };
       case 'models': return { models: await providers.models(input.providerId, signal) };
       case 'job': return { job: installer.job(input.id) };
-      case 'install': return { job: installer.install(input.tool) };
-      case 'update': return { job: installer.updateTool(input.tool) };
-      case 'reinstall': return { job: installer.reinstall(input.tool) };
+      case 'install': return { job: installer.install(input.tool, installSource(input)) };
+      case 'update': return { job: installer.updateTool(input.tool, installSource(input)) };
+      case 'reinstall': return { job: installer.reinstall(input.tool, installSource(input)) };
       case 'uninstall': return { job: installer.uninstall(input.tool) };
       case 'cancel': return { job: installer.cancel(input.id) };
       case 'setDefault': {

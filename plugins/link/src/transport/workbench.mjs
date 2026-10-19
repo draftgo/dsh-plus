@@ -168,13 +168,13 @@ export function createWorkbench(ctx, store, { webRoot, workbenchRoot } = {}) {
         res.writeHead(200, { ...headers, 'content-type': 'application/json; charset=utf-8' }); res.end('{"apps":[]}'); return;
       }
       if (path.startsWith('api/')) {
-        if (path === 'api/commander-link' || path.startsWith('api/commander-link/')) throw fail('请在电脑上管理配对设备', 403);
+        if (['api/commander-link', 'api/commander-devices'].some(route => path === route || path.startsWith(route + '/'))) throw fail('请在电脑上管理配对设备', 403);
         if (!['GET', 'HEAD', 'POST'].includes(req.method)) throw fail('不支持的方法', 405);
         const target = new URL('/' + path + url.search, url.origin);
         const api = ctx.connection.createSharedFetchHandler('/api');
         const mode = api.requestBodyMode?.({ method: req.method, url: target }) ?? 'buffered';
         const incomingHeaders = new Headers();
-        for (const [key, value] of Object.entries(req.headers)) if (typeof value === 'string' && !['authorization', 'cookie'].includes(key)) incomingHeaders.set(key, value);
+        for (const [key, value] of Object.entries(req.headers)) if (typeof value === 'string' && !key.startsWith(':') && !['authorization', 'cookie'].includes(key)) incomingHeaders.set(key, value);
         const options = { method: req.method, headers: incomingHeaders, signal };
         if (!['GET', 'HEAD'].includes(req.method)) {
           if (mode === 'streaming') { options.body = Readable.toWeb(req); options.duplex = 'half'; }

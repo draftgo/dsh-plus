@@ -130,3 +130,17 @@ test('HTTP permission errors remain check failures instead of claiming no publis
   const status = await f.service.status();
   assert.equal(status.phase, 'error'); assert.match(status.error, /403/); assert.equal(status.notice, '');
 });
+
+test('a check never reports a ready release as idle while mutation admission remains occupied', async t => {
+  const f = await fixture(t);
+  await f.service.dispatch({ action: 'check' });
+  for (let index = 0; index < 64; index++) {
+    const status = await f.service.status();
+    if (status.phase === 'idle' && status.release?.plugin.available) assert.equal(status.canInstall, true);
+  }
+  await f.service.settled();
+  assert.equal((await f.service.status()).lastAction, 'check');
+  await f.service.dispatch({ action: 'install' });
+  await f.service.settled();
+  assert.equal((await f.service.status()).lastAction, 'install');
+});

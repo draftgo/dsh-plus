@@ -23,6 +23,14 @@
 .cmd-tool-badges span { padding: 3px 6px; font-size: 10px; color: var(--dsw-alias-label-secondary, #888); border-radius: 4px; background: var(--dsw-alias-interactive-bg-hover, #8881); }
 .cmd-tool-badges span[data-ready=true] { color: var(--dsw-alias-status-success, #398361); }
 .cmd-tool-install-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.cmd-tool-download { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 16px 0 4px; }
+.cmd-tool-download-source { display: flex; align-items: center; gap: 10px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.cmd-tool-download-source legend { float: left; padding: 0; font-size: 11px; color: var(--dsw-alias-label-secondary, #888); line-height: 30px; }
+.cmd-tool-download-source [role=radiogroup] { display: flex; padding: 2px; gap: 2px; border-radius: 7px; background: var(--dsw-alias-interactive-bg-hover, #8881); }
+.cmd-tool-download-source button { min-height: 28px; padding: 4px 9px; border: 0; border-radius: 5px; background: transparent; color: var(--dsw-alias-label-secondary, #888); font: inherit; font-size: 11px; cursor: pointer; }
+.cmd-tool-download-source button[aria-checked=true] { background: var(--dsw-alias-bg-layer-2, #fff); color: var(--dsw-alias-label-primary, #222); box-shadow: 0 1px 3px #0000000c; }
+.cmd-tool-download-source button:disabled { opacity: .55; cursor: default; }
+.cmd-tool-download > .cmd-tool-hint { font-size: 11px; }
 .cmd-tool-button, .cmd-tool-icon { color: inherit; background: transparent; border: 1px solid var(--dsw-alias-border-l1, #8883); border-radius: 6px; min-height: 32px; padding: 6px 10px; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; transition: background 140ms ease; }
 .cmd-tool-button:hover:not(:disabled), .cmd-tool-icon:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, #8882); }
 .cmd-tool-button:disabled, .cmd-tool-icon:disabled, .cmd-tool-select:disabled { opacity: .45; cursor: default; }

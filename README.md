@@ -1,10 +1,10 @@
-# DSH-Plus
+# 小角 · DSH-Plus
 
 <img src="assets/brand/dsh-plus-logo.svg" width="80" height="80" alt="DSH-Plus 吉祥物小角">
 
 为官方 DeepSeek Harness 增加编码 Agent 接管、Voice 语音与 Link 多端直连。保留官方引擎，不修改其源码。
 
-小角是 DSH-Plus 的统一 Logo 与吉祥物 IP，品牌素材见 [assets/brand](assets/brand/README.md)。
+小角是桌面与 Android 应用名称，也是 DSH-Plus 的统一 Logo 与吉祥物 IP，品牌素材见 [assets/brand](assets/brand/README.md)。
 
 ## 安装插件
 
@@ -22,7 +22,7 @@ dsh plugin --profile desktop add ./plugins/commander
 
 公网：配置自己可达的 HTTPS 根地址，按 [Nginx 示例](plugins/link/config/nginx.example.conf) 反代 `/link/`；Android App 或手机/电脑浏览器配对后接入。公网模式不会自动打通家中 NAT；iPhone 首版使用公网网页。
 
-下载验收包见 [Releases](https://github.com/draftgo/dsh-plus/releases)。完整 Windows EXE 内置官方 DSH、Plus、Voice 与 Link，安装后无需再装插件；已通过 Windows CI 构建和静默安装。Android debug 包用于验收；没有 iOS 原生包。人工桌面、手机真机与蜂窝网络验收边界见 [实现记录](Design/Link入口与移动端实现记录.md)。
+下载正式安装包见 [Releases](https://github.com/draftgo/dsh-plus/releases)。完整 Windows EXE 内置官方 DSH、Plus、Voice 与 Link，安装后无需再装插件；已通过 Windows CI 构建和静默安装。Android 使用独立持久发行签名；旧 debug 验收包首次切换需卸载后安装正式版，后续正式版可覆盖升级；没有 iOS 原生包。人工桌面、手机真机与蜂窝网络验收边界见 [实现记录](Design/Link入口与移动端实现记录.md)。
 
 ## 项目结构
 

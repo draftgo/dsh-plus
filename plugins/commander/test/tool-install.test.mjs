@@ -13,7 +13,7 @@ async function fixture(t, options = {}) {
   const calls = []; let manager;
   const executor = async (command, args, opts) => {
     calls.push({ command, args, env: opts.env });
-    if (args[0] === 'install' || args[0] === 'tool') {
+    if (args.includes('install') || args[0] === 'tool') {
       const prefix = args[0] === 'tool' ? opts.env.UV_TOOL_BIN_DIR.replace(/.bin$/, '') : args[args.indexOf('--prefix') + 1];
       const tool = TOOL_CATALOG.find(tool => args.includes(tool.packageName + '@latest') || args.includes(tool.source));
       const file = manager.managedExecutable(tool.id); await mkdir(join(prefix, 'bin'), { recursive: true }); await writeFile(file, 'fixture'); await chmod(file, 0o755);
@@ -21,7 +21,8 @@ async function fixture(t, options = {}) {
     }
     return { stdout: 'tool 1.2.3' };
   };
-  manager = new ToolInstaller({ root: join(dir, 'tools'), env: { PATH: bin, API_KEY: 'secret-value' }, executor, ...options });
+  const runtime = { supported: () => true, resolveNode: async () => process.execPath, ensure: async () => ({ command: join(bin, 'npm'), args: [], binDir: bin }) };
+  manager = new ToolInstaller({ root: join(dir, 'tools'), env: { PATH: bin, API_KEY: 'secret-value' }, executor, runtime, ...options });
   t.after(() => manager.close()); return { dir, bin, calls, manager };
 }
 async function done(manager, id) {
@@ -125,7 +126,7 @@ test('Windows system npm launch resolves beside the system shim even when a mana
   await writeFile(join(managedPkg, 'package.json'), JSON.stringify({ bin: { codex: 'other.js' } })); await writeFile(join(managedPkg, 'other.js'), 'fixture'); await writeFile(manager.managedExecutable('codex'), 'fixture');
   await writeFile(join(manager.prefix('codex'), 'dsh-install.json'), JSON.stringify({ owner: 'dsh-plus', toolId: 'codex' }));
   assert.deepEqual(await manager.resolveLaunch('codex'), { command: process.execPath, args: [join(pkg, 'cli.js')] });
-  assert.deepEqual(await manager.resolveLaunch('codex', { managed: true }), { command: process.execPath, args: [join(managedPkg, 'other.js')] });
+  assert.deepEqual(await manager.resolveLaunch('codex', { managed: true }), { command: process.execPath, args: [join(managedPkg, 'other.js')], env: manager.runtimeEnvironment(process.execPath, manager.env) });
 });
 test('cancelled executions keep the tool locked until the subprocess exits', async t => {
   let release, started; const entered = new Promise(resolve => { started = resolve; });
@@ -143,10 +144,68 @@ test('Windows managed npm launcher resolves JavaScript entry without a shell', a
   await writeFile(join(packageDir, 'package.json'), JSON.stringify({ bin: { pi: 'cli.js' } })); await writeFile(join(packageDir, 'cli.js'), 'fixture');
   await writeFile(manager.managedExecutable('pi'), 'fixture');
   await writeFile(join(manager.prefix('pi'), 'dsh-install.json'), JSON.stringify({ owner: 'dsh-plus', toolId: 'pi' }));
-  assert.deepEqual(await manager.resolveLaunch('pi'), { command: process.execPath, args: [join(packageDir, 'cli.js')] });
+  assert.deepEqual(await manager.resolveLaunch('pi'), { command: process.execPath, args: [join(packageDir, 'cli.js')], env: manager.runtimeEnvironment(process.execPath, manager.env) });
 });
 test('executor invokes argv without a shell and kills cancelled subprocess', async () => {
   const result = await executeToolCommand(process.execPath, ['-e', 'process.stdout.write(process.argv[1])', '; echo unsafe']); assert.equal(result.stdout, '; echo unsafe');
   const controller = new AbortController(); const pending = executeToolCommand(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { signal: controller.signal });
   controller.abort(); await assert.rejects(pending, /cancelled/);
+});
+
+
+test('missing npm stays installable and prepares runtime automatically before mirrored install', async t => {
+  const { manager, calls } = await fixture(t);
+  let prepared; manager.env.PATH = '';
+  manager.runtime = { supported: () => true, resolveNode: async () => process.execPath, ensure: async options => {
+    prepared = options; options.onMessage('正在下载 Node.js');
+    return { command: process.execPath, args: ['/private/npm-cli.js'], binDir: '/private' };
+  } };
+  assert.equal((await manager.list()).find(item => item.id === 'codex').canInstall, true);
+  const messages = []; manager.on('job', job => messages.push(job.message));
+  const job = await done(manager, manager.install('codex').id);
+  assert.equal(job.status, 'succeeded'); assert.equal(job.source, 'mirror');
+  assert.equal(prepared.source, 'mirror'); assert.equal(prepared.env.API_KEY, undefined);
+  assert.notEqual(prepared.env.HOME, manager.env.HOME);
+  const install = calls.find(call => call.args.includes('install'));
+  assert.equal(install.command, process.execPath); assert.equal(install.args[0], '/private/npm-cli.js');
+  assert.equal(install.args[install.args.indexOf('--registry') + 1], 'https://registry.npmmirror.com');
+  assert.equal(install.env.npm_config_registry, 'https://registry.npmmirror.com');
+  assert.ok(messages.some(message => message.includes('下载 Node.js')));
+  assert.ok(messages.some(message => message.includes('验证 Codex')));
+});
+
+test('explicit source survives update/reinstall; npm settings cannot override selection or write user configuration', async t => {
+  const { manager, calls } = await fixture(t);
+  Object.assign(manager.env, { NPM_CONFIG_REGISTRY: 'https://wrong.test', npm_config_prefix: '/outside', NODE_OPTIONS: '--require /outside/inject.js', ELECTRON_RUN_AS_NODE: '1' });
+  const home = manager.env.HOME;
+  assert.throws(() => manager.install('pi', { source: 'unknown' }), /下载源/);
+  assert.equal((await done(manager, manager.install('pi', { source: 'official' }).id)).status, 'succeeded');
+  assert.equal((await done(manager, manager.updateTool('pi', { source: 'official' }).id)).status, 'succeeded');
+  assert.equal((await done(manager, manager.reinstall('pi').id)).status, 'succeeded');
+  const installs = calls.filter(call => call.args.includes('install'));
+  assert.deepEqual(installs.map(call => call.env.npm_config_registry), ['https://registry.npmjs.org', 'https://registry.npmjs.org', 'https://registry.npmmirror.com']);
+  for (const call of installs) {
+    assert.equal(call.env.NPM_CONFIG_REGISTRY, undefined); assert.equal(call.env.npm_config_prefix, undefined);
+    assert.equal(call.env.NODE_OPTIONS, undefined); assert.equal(call.env.ELECTRON_RUN_AS_NODE, undefined);
+    assert.ok(call.env.npm_config_userconfig.startsWith(manager.prefix('pi')));
+  }
+  assert.equal(manager.env.HOME, home); assert.equal(manager.env.NPM_CONFIG_REGISTRY, 'https://wrong.test');
+});
+
+test('failed runtime preparation is surfaced without starting npm and remains removable', async t => {
+  const { manager, calls } = await fixture(t);
+  manager.runtime.ensure = async () => { throw new Error('Node.js 下载校验失败'); };
+  const job = await done(manager, manager.install('codex').id);
+  assert.equal(job.status, 'failed'); assert.match(job.error, /校验失败/); assert.equal(calls.length, 0);
+  assert.equal((await done(manager, manager.uninstall('codex').id)).status, 'succeeded');
+});
+
+test('version receipt excludes CLI warnings before the actual version', async t => {
+  const { manager } = await fixture(t);
+  const execute = manager.executor;
+  manager.executor = async (command, args, options) => args.includes('--version')
+    ? { stdout: 'WARNING: temporary HOME has limited helpers\ncodex-cli 0.163.0\n' }
+    : execute(command, args, options);
+  assert.equal((await done(manager, manager.install('codex').id)).status, 'succeeded');
+  assert.equal((await manager.receipt('codex')).version, 'codex-cli 0.163.0');
 });

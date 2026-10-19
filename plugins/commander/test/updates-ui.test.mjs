@@ -190,3 +190,93 @@ test('legacy desktop keeps its migration guidance while a managed server can sti
   try { await managed.click('更新，有更新'); assert.equal(managed.button('更新插件').disabled, false); assert.doesNotMatch(managed.document.querySelector('[role="dialog"]').textContent, /此主机由服务器部署管理/); }
   finally { await managed.dispose(); }
 });
+
+
+test('opening status refresh never disables installation or swallows a click; late status cannot overwrite installation', async () => {
+  let refresh, statusCalls = 0;
+  const view = await mount(({ action }) => {
+    if (action === 'status' && ++statusCalls === 2) return new Promise(resolve => { refresh = resolve; });
+    return action === 'install' ? { ...update(), phase: 'ready', restartRequired: true } : update();
+  });
+  try {
+    await view.click('更新，有更新');
+    assert.equal(view.button('更新插件').disabled, false);
+    await view.click('更新插件');
+    assert.equal(view.calls.at(-1).action, 'install');
+    assert.match(view.document.querySelector('[role="dialog"]').textContent, /重启主机应用后生效/);
+    await view.flush(() => refresh(update()));
+    assert(view.button('更新，待重启'));
+    assert.equal(view.button('更新插件'), undefined);
+  } finally { await view.dispose(); }
+});
+
+test('failed plugin installation retries installation and shows an explicit block reason', async () => {
+  let installations = 0;
+  const view = await mount(({ action }) => action === 'install' && ++installations === 1 ? { httpError: 409, error: '下载期间有新任务开始，结束后再点更新' } : update());
+  try {
+    await view.click('更新，有更新');
+    await view.click('更新插件');
+    assert.match(view.document.querySelector('[role="alert"]').textContent, /有新任务开始/);
+    await view.click('重试');
+    assert.equal(view.calls.at(-1).action, 'install');
+    assert.equal(installations, 2);
+  } finally { await view.dispose(); }
+});
+
+test('host activity becoming idle enables installation without reopening or disabling for the status poll', async () => {
+  let state = { ...update(), busy: true, canInstall: false }, tick, refresh, hold = false;
+  const view = await mount(() => hold ? new Promise(resolve => { refresh = resolve; }) : state, {}, { setInterval: callback => { tick = callback; return 1; }, clearInterval() {} });
+  try {
+    await view.click('更新，有更新');
+    assert(view.button('更新插件').disabled);
+    assert.match(view.button('更新插件').title, /有任务正在运行/);
+    assert.equal(typeof tick, 'function');
+    state = update();
+    await view.flush(tick);
+    assert.equal(view.button('更新插件').disabled, false);
+    hold = true;
+    await view.flush(tick);
+    assert.equal(view.button('更新插件').disabled, false);
+    assert.equal(view.button('更新插件').textContent, '更新插件');
+    await view.flush(() => refresh(state));
+  } finally { await view.dispose(); }
+});
+
+test('transient unavailable install status explains the reason and keeps a visible recheck path', async () => {
+  const view = await mount(() => ({ ...update(), canInstall: false }));
+  try {
+    await view.click('更新，有更新');
+    assert(view.button('更新插件').disabled);
+    assert.match(view.document.querySelector('[role="dialog"]').textContent, /更新状态尚未就绪/);
+    assert.equal(view.button('重新检查').disabled, false);
+    await view.click('重新检查');
+    assert.equal(view.calls.at(-1).action, 'check');
+  } finally { await view.dispose(); }
+});
+
+test('asynchronous installation failure retries the failed operation from host state', async () => {
+  const view = await mount(({ action }) => action === 'install' ? update() : { ...update(), phase: 'error', error: '下载校验失败', lastAction: 'install' });
+  try {
+    await view.click('更新，有更新');
+    assert.match(view.document.querySelector('[role="alert"]').textContent, /下载校验失败/);
+    await view.click('重试');
+    assert.equal(view.calls.at(-1).action, 'install');
+  } finally { await view.dispose(); }
+});
+
+test('failed status polling can recover an active download instead of trying a conflicting check', async () => {
+  let state = { ...update(), phase: 'downloading' }, tick, failed = false;
+  const view = await mount(() => failed ? { httpError: 503, error: '暂时无法连接' } : state, {}, { setInterval: callback => { tick = callback; return 1; }, clearInterval() {} });
+  try {
+    await view.click('更新，下载中');
+    failed = true;
+    await view.flush(tick);
+    assert.match(view.document.querySelector('[role="alert"]').textContent, /暂时无法连接/);
+    assert.equal(view.button('重试').disabled, false);
+    failed = false; state = { ...state, phase: 'ready', restartRequired: true };
+    await view.click('重试');
+    assert.equal(view.calls.at(-1).action, 'status');
+    assert.equal(view.document.querySelector('[role="alert"]'), null);
+    assert(view.button('更新，待重启'));
+  } finally { await view.dispose(); }
+});

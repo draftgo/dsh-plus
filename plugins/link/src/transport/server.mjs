@@ -1,4 +1,4 @@
-import { createServer } from 'node:https';
+import { createSecureServer } from 'node:http2';
 import { readFile } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
 import { isIP } from 'node:net';
@@ -72,19 +72,24 @@ async function body(request) {
 /** Separate encrypted carrier: it exposes only Link's allowlist, never the Host admin API. */
 export async function listen({ identity, config, webRoot, store, dispatch, workbench, onError }) {
   const rates = new Map();
+  const sockets = new Set(), sessions = new Set();
   let active = true;
   const send = (response, status, value, type = 'application/json; charset=utf-8') => {
     if (response.destroyed) return;
     response.writeHead(status, { ...headers, 'content-type': type });
     response.end(type.startsWith('application/json') ? JSON.stringify(value) : value);
   };
-  const server = createServer({ key: identity.key, cert: identity.cert, minVersion: 'TLSv1.2' }, async (req, res) => {
+  // Harness opens several persistent subscriptions. Multiplex them over HTTP/2
+  // so session navigation and uplink calls cannot exhaust a browser's H1 pool.
+  // Keep HTTP/1.1 for existing native clients and reverse proxies.
+  const server = createSecureServer({ key: identity.key, cert: identity.cert, minVersion: 'TLSv1.2', allowHTTP1: true }, async (req, res) => {
     try {
       if (!active) throw fail('Link 已关闭', 503);
       const publicHost = config.publicUrl ? new URL(config.publicUrl).host : undefined;
       const allowed = new Set(['localhost', '127.0.0.1', '::1', ...localAddresses(), config.host].map(a => authority(a, server.address().port)));
       if (publicHost) allowed.add(publicHost);
-      const host = req.headers.host;
+      const host = req.headers[':authority'] || req.headers.host;
+      if (req.headers.host && req.headers[':authority'] && req.headers.host !== req.headers[':authority']) throw fail('主机地址不一致', 403);
       if (!host || !allowed.has(host)) throw fail('主机地址未授权', 403);
       if (req.headers.origin && req.headers.origin !== `https://${host}`) throw fail('来源未授权', 403);
       const url = new URL(req.url, `https://${host}`);
@@ -131,6 +136,8 @@ export async function listen({ identity, config, webRoot, store, dispatch, workb
       return send(res, 200, await dispatch(input, device));
     } catch (e) { if (res.headersSent) res.destroy(); else send(res, e.status ?? 400, { error: e.message }); }
   });
+  server.on('connection', socket => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); });
+  server.on('session', session => { sessions.add(session); session.once('close', () => sessions.delete(session)); });
   // Mobile links can pause while a request body crosses a high-latency network;
   // keep this below the reverse proxy's 120s upstream limits while allowing
   // normal workbench API and uplink requests to finish without premature 408s.
@@ -143,6 +150,6 @@ export async function listen({ identity, config, webRoot, store, dispatch, workb
   return {
     port: server.address().port,
     timeouts: { request: server.requestTimeout, headers: server.headersTimeout, keepAlive: server.keepAliveTimeout },
-    close: async () => { active = false; await workbench?.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); rates.clear(); },
+    close: async () => { active = false; await workbench?.close(); const ended = new Promise(resolve => server.close(resolve)); for (const session of sessions) session.destroy(); for (const socket of sockets) socket.destroy(); await ended; rates.clear(); },
   };
 }

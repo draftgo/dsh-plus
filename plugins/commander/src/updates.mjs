@@ -27,7 +27,7 @@ export async function createUpdates({ directory, profile, runtime, version, engi
   const configFile = join(directory, 'updates.json');
   const lifetime = new AbortController();
   const updateFetch = (url, options = {}) => fetcher(url, { ...options, signal: AbortSignal.any([lifetime.signal, ...(options.signal ? [options.signal] : [])]) });
-  let config = { ...DEFAULT_UPDATE_CONFIG }, phase = 'idle', release = null, error = '', checkedAt = null, task = null, closed = false;
+  let config = { ...DEFAULT_UPDATE_CONFIG }, phase = 'idle', release = null, error = '', checkedAt = null, task = null, lastAction = null, closed = false;
   try { config = normalizeUpdateConfig(await json(configFile)); } catch (failure) { if (failure.code !== 'ENOENT') error = '更新源配置读取失败，请重新选择更新来源'; }
   const installed = async () => profile ? await install.getInstallState(profile) : { managed: false };
   const status = async () => {
@@ -36,7 +36,9 @@ export async function createUpdates({ directory, profile, runtime, version, engi
     const compatible = !!release && !!engineVersion && isEngineCompatible(engineVersion, release.engine);
     const currentApp = appVersion ?? state.appVersion;
     return {
-      phase: restartRequired ? 'ready' : phase, installation, notice: phase === 'unpublished' ? '更新通道尚未就绪' : '', config, current: { plugin: version, engine: engineVersion, app: currentApp },
+      // A check can publish its release before the task's finalizer releases admission.
+      // Keep that intermediate response active so clients continue polling readiness.
+      phase: restartRequired ? 'ready' : task && phase === 'idle' ? 'checking' : phase, lastAction, installation, notice: phase === 'unpublished' ? '更新通道尚未就绪' : '', config, current: { plugin: version, engine: engineVersion, app: currentApp },
       managed: !!state.managed, busy, restartRequired, checkedAt, error,
       canInstall: !!state.managed && !busy && !restartRequired && !task && compatible && isNewerVersion(release.plugin.version, version),
       canRollback: !!state.managed && !!state.previous && !restartRequired && !task,
@@ -44,7 +46,8 @@ export async function createUpdates({ directory, profile, runtime, version, engi
         ...(release.app ? { app: { ...release.app, available: !currentApp || isNewerVersion(release.app.version, currentApp), url: resolveUpdateUrl(release.app.url, config) } } : {}) } : null,
     };
   };
-  const start = work => {
+  const start = (action, work) => {
+    lastAction = action;
     error = '';
     task = Promise.resolve().then(work).catch(failure => {
       if (failure.code === 'UPDATE_UNPUBLISHED') { release = null; error = ''; phase = 'unpublished'; }
@@ -82,7 +85,7 @@ export async function createUpdates({ directory, profile, runtime, version, engi
         }
         case 'check': {
           phase = 'checking';
-          start(async () => {
+          start('check', async () => {
             const next = await fetchVerifiedRelease({ config, fetcher: updateFetch, publicKey });
             release = next;
             checkedAt = new Date().toISOString(); phase = 'idle';
@@ -95,7 +98,7 @@ export async function createUpdates({ directory, profile, runtime, version, engi
           if (!isNewerVersion(release.plugin.version, version)) throw conflict('插件已是最新版本');
           const selected = release;
           phase = 'downloading';
-          start(async () => {
+          start('install', async () => {
             const archive = join(state.root, `.download-${randomUUID()}.tar.gz`);
             try {
               const bytes = verifyArtifact(await fetchUpdateBytes(selected.plugin.url, { config, fetcher: updateFetch, maxBytes: selected.plugin.size, timeoutMs: 5 * 60_000 }), selected.plugin);
@@ -115,7 +118,7 @@ export async function createUpdates({ directory, profile, runtime, version, engi
           const state = await guard();
           if (!state.previous) throw conflict('暂无可回退版本');
           phase = 'downloading';
-          start(async () => { if (await isBusy()) throw conflict('有任务正在运行'); await install.rollbackRelease({ profile, runtime }); phase = 'ready'; });
+          start('rollback', async () => { if (await isBusy()) throw conflict('有任务正在运行'); await install.rollbackRelease({ profile, runtime }); phase = 'ready'; });
           break;
         }
         default: throw new Error('未知更新操作');

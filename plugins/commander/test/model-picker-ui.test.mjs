@@ -25,14 +25,14 @@ test('model picker activates against the official single and list slot contracts
   assert.equal(entries[0].options.id,'commander-native-activity');
  } finally {for(const cleanup of cleanups.reverse())cleanup();}
 });
-function render({provider=null,toolsOpen=false,directory=catalog,groups=state.groups,catalogLoading=false,catalogError='',sessionBinding=null,bindingError=''}={}){
+function render({provider=null,toolsOpen=false,directory=catalog,groups=state.groups,catalogLoading=false,catalogError='',sessionBinding=null,bindingError='',current=null}={}){
  const values=[true,'codex',provider,'',directory,catalogLoading,0,toolsOpen,{position:'fixed'},'',catalogError,sessionBinding,bindingError],actions=[],selections=[],opened=[];let cursor=0,Component,definition;
  const react={createElement:(type,props,...children)=>({type,props:props||{},children:children.flat(Infinity).filter(x=>x!==false&&x!=null)}),useState:()=>{const id=cursor++;return[values[id],value=>actions.push({id,value})]},useEffect(){},useId:()=> 'picker',useRef:initial=>({current:initial})};
  const module={exports:{}};
  runInNewContext(code,{module,exports:module.exports,URL,document:{createElement:()=>({remove(){}}),head:{append(){}}},require:id=>id==='react'?react:id==='react-dom'?{createPortal:node=>node}:id.includes('model-picker-state')?helpers:id.includes('iconsax')?{UIIcon:'Icon'}:id.includes('tool-brand')?{ToolBrandIcon:'Brand'}:{default:''}});
  const shell={children:{'settings.section':{}},store:{create:()=>({actions:{openSection:id=>opened.push(id)}})}};
  module.exports.mountModelPicker({effect(){},sessions:{subagentAddress:()=>undefined},modelDirectories:{directoryFor:()=>({store:{},load:async()=>{},select:async()=>{}})},slots:{entries:()=>[shell],inject:(slot,cb)=>{if(slot==='conversation.input.model')cb();},register:(entry,component)=>{Component=component;definition=entry}}});
- const tree=Component({available:true,locked:false,useDirectory:()=>({...state,groups}),load:async()=>{},openToolSettings:()=>opened.push('harness-tools'),select:selection=>{selections.push(selection);return Promise.resolve({ok:true})}});
+ const tree=Component({available:true,locked:false,useDirectory:()=>({...state,groups,current}),load:async()=>{},openToolSettings:()=>opened.push('harness-tools'),select:selection=>{selections.push(selection);return Promise.resolve({ok:true})}});
  const nodes=x=>x&&typeof x==='object'?[x,...x.children.flatMap(nodes)]:[];
  return {nodes:nodes(tree),actions,selections,opened,inject:definition.inject};
 }
@@ -93,4 +93,18 @@ test('native activity projects Codex command start, completion and output withou
  assert.deepEqual(label({type:'item',data:{phase:'item/completed',item:{type:'commandExecution',command:'npm test'}}}),{label:'命令已完成',detail:'npm test',state:'done'});
  assert.deepEqual(label({type:'tool.output',data:{text:'tests passed\n'}}),{label:'命令输出',detail:'tests passed',state:'running'});
  assert.equal(label({type:'text.delta',data:{text:'ignored'}}),null);
+});
+
+test('selected model caption retains its exact name and exposes complete text when constrained', () => {
+ for (const current of [null, {provider:'commander-codex',model:route.modelId,reasoningEffort:'high'}, {provider:'commander-codex',model:'opaque/custom:model-name'}]) {
+  const view=render({current});
+  const caption=view.nodes.find(node=>node.props.className==='cmd-model-caption');
+  const label=current?.model === route.modelId ? 'Model X · High' : current?.model || '选择模型';
+  assert.equal(caption.children.join(''),label);
+  assert.equal(caption.props.title,label);
+ }
+ const css=readFileSync(new URL('../client/model-picker.css',import.meta.url),'utf8');
+ assert.match(css,/\.cmd-model-caption\{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\}/);
+ assert.doesNotMatch(css,/--dsh-composer-model-text-display/);
+ assert.match(css,/@media\(max-width:767px\)\{\.cmd-model-trigger\{max-width:min\(180px,46vw\);flex-shrink:1\}/);
 });

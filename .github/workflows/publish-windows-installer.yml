@@ -8,7 +8,7 @@ on:
       release_tag:
         description: Application release tag (must match the installer version)
         required: true
-        default: v0.1.3
+        default: v0.1.4
 permissions:
   actions: read
   contents: write
@@ -22,28 +22,62 @@ jobs:
       RUN_ID: ${{ inputs.run_id }}
       RELEASE_TAG: ${{ inputs.release_tag }}
     steps:
+      - name: Require a successful Windows installer build
+        id: source
+        run: |
+          set -euo pipefail
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh run view "$RUN_ID" --json status,conclusion,workflowName,headBranch,headSha > source-run.json
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          run = json.load(open('source-run.json'))
+          assert run['status'] == 'completed' and run['conclusion'] == 'success', run
+          assert run['workflowName'] == 'DSH-Plus Windows installer' and run['headBranch'] == 'main', run
+          assert re.fullmatch(r'[0-9a-f]{40}', run['headSha']), run
+          result = subprocess.run(['gh', 'api', f"repos/{os.environ['GH_REPO']}/commits/{os.environ['RELEASE_TAG']}"], capture_output=True, text=True)
+          if result.returncode == 0:
+              assert json.loads(result.stdout)['sha'] == run['headSha'], 'Release tag must reference the verified build source'
+          elif 'HTTP 404' not in result.stderr:
+              raise RuntimeError(result.stderr)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f"sha={run['headSha']}\n")
+          PY
       - uses: actions/checkout@v4
         with:
+          ref: ${{ steps.source.outputs.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Require a successful Windows installer build
-        run: |
-          [[ "$RUN_ID" =~ ^[0-9]+$ ]]
-          gh run view "$RUN_ID" --json status,conclusion,workflowName,headBranch > source-run.json
-          python3 - <<'PY'
-          import json
-          run = json.load(open('source-run.json'))
-          assert run['status'] == 'completed' and run['conclusion'] == 'success', run
-          assert run['workflowName'] == 'DSH-Plus Windows installer' and run['headBranch'] == 'main', run
-          PY
       - uses: actions/download-artifact@v4
         with:
           name: dsh-plus-windows-x64
           run-id: ${{ inputs.run_id }}
           github-token: ${{ github.token }}
           path: installer
+      - name: Validate verified artifact version, source and checksums
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os
+          directory = Path('installer')
+          metadata = json.loads((directory / 'build-source.json').read_text())
+          version = os.environ['RELEASE_TAG'].removeprefix('v')
+          assert metadata['schemaVersion'] == 1 and metadata['sourceSha'] == os.environ['SOURCE_SHA']
+          assert metadata['version'] == version == json.loads(Path('package.json').read_text())['version']
+          assert metadata['artifact'] == f'xiaojiao-{version}-win-x64-setup.exe'
+          assert set(metadata['verified']) == {'packaged-runtime', 'fresh-install', 'legacy-upgrade'}
+          names = {item['name'] for item in metadata['files']}
+          assert metadata['artifact'] in names
+          assert names == {path.name for path in directory.iterdir() if path.name != 'build-source.json'}
+          for item in metadata['files']:
+              assert Path(item['name']).name == item['name'], 'Invalid artifact path'
+              content = (directory / item['name']).read_bytes()
+              assert len(content) == item['size'] and hashlib.sha256(content).hexdigest() == item['sha256'], item['name']
+          PY
       - name: Publish installer and checksum
         run: |
           set -euo pipefail
@@ -62,7 +96,7 @@ jobs:
           files = list(Path('installer').glob('*-win-x64-setup.exe'))
           assert len(files) == 1, files
           executable = files[0]
-          assert executable.name == f"dsh-plus-{os.environ['RELEASE_TAG'].removeprefix('v')}-win-x64-setup.exe", 'Installer version must match the release tag'
+          assert executable.name == f"xiaojiao-{os.environ['RELEASE_TAG'].removeprefix('v')}-win-x64-setup.exe", 'Installer version must match the release tag'
           assert executable.read_bytes()[:2] == b'MZ', 'Expected Windows executable'
           checksum = hashlib.file_digest(executable.open('rb'), 'sha256').hexdigest()
           path = Path('SHA256SUMS.txt')
@@ -71,8 +105,7 @@ jobs:
           print(path.read_text())
           PY
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            source_sha=$(gh run view "$RUN_ID" --json headSha --jq .headSha)
-            gh release create "$RELEASE_TAG" --target "$source_sha" --title "DSH-Plus ${RELEASE_TAG}" --notes "Verified Windows application release. Daily feature updates use the separate plugin channel." --latest=false
+            gh release create "$RELEASE_TAG" --target '${{ steps.source.outputs.sha }}' --title "小角 ${RELEASE_TAG}" --notes "Verified Windows application release. Daily feature updates use the separate plugin channel. Windows Authenticode signing is not configured." --latest=false
           fi
           gh release upload "$RELEASE_TAG" installer/*-win-x64-setup.exe SHA256SUMS.txt --clobber
       - name: Publish isolated application update channel
@@ -80,11 +113,11 @@ jobs:
           set -euo pipefail
           executable=$(find installer -maxdepth 1 -name '*-win-x64-setup.exe' -print -quit)
           filename=$(basename "$executable")
-          version="${filename#dsh-plus-}"
+          version="${filename#xiaojiao-}"
           version="${version%-win-x64-setup.exe}"
           node scripts/desktop/create-app-update-feed.mjs "$executable" "$version"
           if ! gh release view app-updates >/dev/null 2>&1; then
-            gh release create app-updates --title "DSH-Plus application update channel" --notes "Application update feed. Daily feature updates use the separate plugin channel." --latest=false
+            gh release create app-updates --title "小角 application update channel" --notes "Application update feed. Daily feature updates use the separate plugin channel." --latest=false
           fi
           gh release upload app-updates installer/*-win-x64-setup.exe installer/latest.yml --clobber
           for blockmap in installer/*.blockmap; do

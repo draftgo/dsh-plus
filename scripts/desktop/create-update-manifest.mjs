@@ -50,7 +50,7 @@ async function main() {
   if (options['--app-feed']) {
     const feed = JSON.parse(await readFile(options['--app-feed'], 'utf8'));
     const file = feed.files?.[0];
-    if (!file || file.url !== `dsh-plus-${feed.version}-win-x64-setup.exe`) throw new Error('应用更新清单无效');
+    if (!file || ![`xiaojiao-${feed.version}-win-x64-setup.exe`, `dsh-plus-${feed.version}-win-x64-setup.exe`].includes(file.url)) throw new Error('应用更新清单无效');
     app = { version: feed.version, url: releaseDownloadUrl(file.url, 'app-updates'), size: file.size };
   }
   const result = await createUpdateManifest({
