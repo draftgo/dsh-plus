@@ -1,7 +1,7 @@
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, symlinkSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -96,14 +96,14 @@ test('official profile loader resolves the preinstalled Plus bundle and respects
   assert.equal(existsSync(join(profile, 'lock')), false);
 });
 
-function seedFixture(put, prefix) {
-  const bundleName = releaseBundleName('0.1.0');
-  put(`${prefix}/release.json`, { schemaVersion: 1, version: '0.1.0', platform: process.platform, arch: process.arch, shared: [] });
-  put(`${prefix}/node_modules/dsh-plus/package.json`, { name: 'dsh-plus', version: '0.1.0', type: 'module', dsh: { bundle: { patch: './cordis.patch.yml' } } });
-  for (const file of ['src/plugin.mjs', 'lib/client.js', 'lib/link.mjs', 'lib/link-web/index.html', 'voice/src/plugin.mjs']) put(`${prefix}/node_modules/dsh-plus/${file}`, 'export default true;');
+function seedFixture(put, prefix, version = '0.1.0') {
+  const bundleName = releaseBundleName(version);
+  put(`${prefix}/release.json`, { schemaVersion: 1, version, platform: process.platform, arch: process.arch, shared: [] });
+  put(`${prefix}/node_modules/dsh-plus/package.json`, { name: 'dsh-plus', version, type: 'module', main: './src/plugin.mjs', exports: { '.': './src/plugin.mjs', './client': './lib/client.js', './package.json': './package.json' }, dsh: { bundle: { patch: './cordis.patch.yml' } } });
+  for (const file of ['src/plugin.mjs', 'lib/client.js', 'lib/link.mjs', 'lib/link-web/index.html', 'voice/src/plugin.mjs']) put(`${prefix}/node_modules/dsh-plus/${file}`, `export const version = ${JSON.stringify(version)}; export default true;`);
   const patch = "- insert:\n    - id: commander\n      name: 'dsh-plus'\n";
   put(`${prefix}/node_modules/dsh-plus/cordis.patch.yml`, patch);
-  put(`${prefix}/node_modules/${bundleName}/package.json`, { name: bundleName, displayName: 'DSH-Plus', version: '0.1.0', type: 'module', dependencies: { 'dsh-plus': '0.1.0' }, dsh: { bundle: { patch: './cordis.patch.yml' } } });
+  put(`${prefix}/node_modules/${bundleName}/package.json`, { name: bundleName, displayName: 'DSH-Plus', version, type: 'module', dependencies: { 'dsh-plus': version }, dsh: { bundle: { patch: './cordis.patch.yml' } } });
   put(`${prefix}/node_modules/${bundleName}/cordis.patch.yml`, patch);
 }
 
@@ -117,6 +117,93 @@ function enrollmentFixture(t) {
 }
 
 const enrollmentOptions = { skip: !existsSync(officialBoot) };
+
+/** Exercise the official metadata service and both Node resolvers from the profile's own parent. */
+function resolvedProfilePlugin(root, profile) {
+  const installAnchor = join(root, 'runtime/package.json');
+  writeFileSync(installAnchor, JSON.stringify({ name: 'fixture-runtime', version: '0.0.0', dependencies: {} }));
+  const code = `
+    import { createRequire } from 'node:module';
+    import { readFileSync } from 'node:fs';
+    import { join, dirname } from 'node:path';
+    import { pathToFileURL } from 'node:url';
+    const { bootPath, installAnchor, profile } = JSON.parse(process.argv[1]);
+    const { PluginPackages, createRuntimeResolution, loadProfileDirectory } = await import(pathToFileURL(bootPath).href);
+    const officialRequire = createRequire(bootPath);
+    const { Context } = officialRequire('@deepseek-ai/cordis');
+    const loaded = loadProfileDirectory('dsh', profile, installAnchor);
+    const resolution = await createRuntimeResolution({ installAnchor, profile: loaded, home: dirname(profile) });
+    const ctx = new Context();
+    try {
+      await ctx.plugin(PluginPackages, { resolution });
+      const packages = ctx.pluginPackages;
+      const parent = pathToFileURL(join(profile, 'package.json')).href;
+      const selected = packages.packageOf('dsh-plus', parent);
+      const requireFromProfile = createRequire(parent);
+      const addon = officialRequire('node-addon-require-builtin');
+      const loader = addon.requireBuiltin('internal/modules/esm/loader').getOrInitializeCascadedLoader();
+      const actual = await loader.import('dsh-plus', parent, {});
+      const client = await loader.import('dsh-plus/client', parent, {});
+      console.log(JSON.stringify({
+        tableVersion: resolution.entries.find(entry => entry.name === 'dsh-plus')?.version,
+        metadataVersion: selected?.version,
+        metadataPath: selected?.dir,
+        manifestVersion: JSON.parse(readFileSync(requireFromProfile.resolve('dsh-plus/package.json'), 'utf8')).version,
+        entryPath: requireFromProfile.resolve('dsh-plus'),
+        loadedVersion: actual.version, clientVersion: client.version,
+      }));
+    } finally { await ctx.fiber.dispose(); }
+  `;
+  const result = spawnSync(process.execPath, ['--input-type=module', '--eval', code, JSON.stringify({ bootPath: officialBoot, installAnchor, profile })], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  return JSON.parse(result.stdout.trim());
+}
+
+function putLegacyProfilePlugin(put, version = '0.1.6') {
+  put('profile/node_modules/dsh-plus/package.json', { name: 'dsh-plus', version, type: 'module', main: './src/plugin.mjs', exports: { '.': './src/plugin.mjs', './client': './lib/client.js', './package.json': './package.json' } });
+  for (const file of ['src/plugin.mjs', 'lib/client.js']) put(`profile/node_modules/dsh-plus/${file}`, `export const version = ${JSON.stringify(version)};`);
+}
+
+for (const scenario of [
+  { name: 'upgrades an old managed release', installed: '0.1.6', seed: '0.1.9', expected: '0.1.9' },
+  { name: 'repairs a same-version reinstall', installed: '0.1.9', seed: '0.1.9', expected: '0.1.9' },
+  { name: 'preserves a newer independent plugin', installed: '0.2.0', seed: '0.1.9', expected: '0.2.0' },
+]) test(`installer ${scenario.name} despite a physical legacy profile package`, enrollmentOptions, async t => {
+  for (const enabled of [true, false]) {
+    const { root, put, options } = enrollmentFixture(t);
+    seedFixture(put, 'seed', scenario.installed);
+    const initial = await initializePluginProfile(options);
+    const manifestPath = join(options.profile, 'package.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    manifest.dependencies['kept-plugin'] = '1.2.3';
+    if (!enabled) manifest.dsh.profile.bundles = manifest.dsh.profile.bundles.filter(name => name !== initial.bundleName);
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    putLegacyProfilePlugin(put);
+    if (enabled) {
+      const stale = resolvedProfilePlugin(root, options.profile);
+      assert.equal(stale.tableVersion, scenario.installed, 'the managed bundle already declares the installed release');
+      assert.equal(stale.metadataVersion, '0.1.6', 'a physical legacy package shadows even an undeclared dependency');
+      assert.equal(stale.manifestVersion, '0.1.6');
+      assert.equal(stale.loadedVersion, '0.1.6');
+      assert.equal(stale.clientVersion, '0.1.6');
+    }
+    seedFixture(put, 'installer-seed', scenario.seed);
+    const result = await initializePluginProfile({ ...options, seed: join(root, 'installer-seed') });
+    assert.equal(result.version, scenario.expected);
+    assert.equal(result.enabled, enabled);
+    assert.equal(JSON.parse(readFileSync(manifestPath, 'utf8')).dependencies['kept-plugin'], '1.2.3');
+    if (!enabled) continue;
+    const actual = resolvedProfilePlugin(root, options.profile);
+    assert.equal(actual.tableVersion, scenario.expected, 'official bundle closure names the selected release');
+    assert.equal(actual.metadataVersion, scenario.expected, 'metadata must not select the legacy physical package');
+    assert.equal(actual.manifestVersion, scenario.expected, 'profile-relative manifest resolution uses the selected release');
+    assert.equal(actual.loadedVersion, scenario.expected, 'actual ESM plugin loading uses the selected release');
+    assert.equal(actual.clientVersion, scenario.expected, 'client subpath uses the selected release');
+    assert.equal(realpathSync(actual.metadataPath), realpathSync(join(result.directory, 'node_modules/dsh-plus')));
+    assert.equal(realpathSync(actual.entryPath), realpathSync(join(result.directory, 'node_modules/dsh-plus/src/plugin.mjs')));
+  }
+});
+
 test('old enrollment migrates physically into profile while preserving enabled and disabled choices', enrollmentOptions, async t => {
   for (const enabled of [false, true]) {
     const { root, put, options } = enrollmentFixture(t);

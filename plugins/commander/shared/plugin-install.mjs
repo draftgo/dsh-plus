@@ -141,7 +141,7 @@ export async function activateRelease(options) {
   return atomic.withFileLock(join(resolve(options.profile), 'package.json'), () => activateLocked(options, atomic));
 }
 
-async function activateLocked({ profile, release, enabled, appVersion }, atomic) {
+async function activateLocked({ profile, release, enabled, appVersion, migrateLegacy = false }, atomic) {
   profile = resolve(profile);
   const checked = await describeRelease(resolve(release.directory), release.version);
   const manifestPath = join(profile, 'package.json'), manifest = await json(manifestPath);
@@ -164,7 +164,29 @@ async function activateLocked({ profile, release, enabled, appVersion }, atomic)
     ? { version: before.version, directory: before.directory, bundleName: before.bundleName }
     : before.previous ?? null;
   manifest.dsh.plusInstall = { schemaVersion: 1, version: checked.version, directory: checked.directory, bundleName: checked.bundleName, root: checked.root, previous, appVersion: appVersion ?? before.appVersion ?? null };
-  await atomic.writeFileAtomic(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600, dirMode: 0o700 });
+  // Native lookup inside the profile wins over the selected bundle's fallback.
+  // Only the offline installer may move an old package a running Host can import.
+  const shadow = join(profile, 'node_modules', PLUS_PACKAGE);
+  let backup;
+  if (await present(shadow)) {
+    const legacy = await json(join(shadow, 'package.json'));
+    if (legacy.name !== PLUS_PACKAGE) throw new Error('插件安装位置被其他内容占用，原文件已保留');
+    assertReleaseVersion(legacy.version);
+    if (migrateLegacy || await realpath(shadow) !== await realpath(checked.pluginPath)) {
+      if (!migrateLegacy) throw new Error('检测到旧版插件残留，请关闭小角并重新运行新版安装程序');
+      const migrationRoot = join(profile, '.dsh-plus');
+      await mkdir(migrationRoot, { recursive: true, mode: 0o700 });
+      backup = join(migrationRoot, `.legacy-${randomUUID()}`);
+      await rename(shadow, backup);
+    }
+  }
+  try {
+    await atomic.writeFileAtomic(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600, dirMode: 0o700 });
+  } catch (error) {
+    if (backup) await rename(backup, shadow);
+    throw error;
+  }
+  if (backup) await rm(backup, { recursive: true, force: true });
   return getInstallState(profile);
 }
 

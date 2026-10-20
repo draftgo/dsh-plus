@@ -106,6 +106,7 @@ function Assert-Plus([System.IO.FileInfo]$Installed) {
     if (-not $seed.version -or $state.version -ne $seed.version) { throw "Installed profile plugin version $($state.version) does not match installer seed $($seed.version)" }
     $plugin = Get-Content (Join-Path $state.directory 'node_modules/dsh-plus/package.json') -Raw | ConvertFrom-Json
     if ($plugin.name -ne 'dsh-plus' -or $plugin.version -ne $seed.version) { throw "Active plugin payload version $($plugin.version) does not match installer seed $($seed.version)" }
+    Assert-PluginResolution $Installed $state.version $state.directory
     if (Test-Path (Join-Path $Installed.DirectoryName 'resources/app.asar.unpacked/dsh/node_modules/dsh-plus/package.json')) { throw 'DSH-Plus must be external to the sealed engine runtime' }
     if ($Installed.VersionInfo.ProductName -ne '小角') { throw 'Executable product name is not 小角' }
     $entries = @(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' | Where-Object { $_.InstallLocation -eq $Installed.DirectoryName })
@@ -120,11 +121,63 @@ function Assert-Plus([System.IO.FileInfo]$Installed) {
     $expected = [XiaojiaoInstallerShortcut]::ExistingLongPath($Installed.FullName)
     if (-not [String]::Equals($target, $expected, [StringComparison]::OrdinalIgnoreCase) -or [System.IO.Path]::GetFileName($target) -ne '小角.exe' -or $nativeLink.Arguments -ne '') { throw 'Start Menu shortcut does not launch 小角.exe without arguments' }
 }
+function Assert-PluginResolution([System.IO.FileInfo]$Installed, [string]$ExpectedVersion, [string]$ExpectedDirectory) {
+    $code = @'
+import assert from 'node:assert/strict';
+import { readFileSync, realpathSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+const [profile, resources, expectedVersion, expectedDirectory] = process.argv.slice(1);
+const runtime = join(resources, 'app.asar.unpacked', 'dsh');
+const bootPath = join(runtime, 'node_modules/@deepseek-ai/dsh-app-boot/lib/index.js');
+const anchor = join(runtime, 'node_modules/@deepseek-ai/dsh/package.json');
+const { PluginPackages, createRuntimeResolution, loadProfileDirectory } = await import(pathToFileURL(bootPath).href);
+const { Context } = createRequire(bootPath)('@deepseek-ai/cordis');
+const loaded = loadProfileDirectory('dsh', profile, anchor);
+const resolution = await createRuntimeResolution({ installAnchor: anchor, profile: loaded, home: dirname(dirname(profile)) });
+const ctx = new Context();
+try {
+  await ctx.plugin(PluginPackages, { resolution });
+  const parent = pathToFileURL(join(profile, 'package.json')).href;
+  const selected = ctx.pluginPackages.packageOf('dsh-plus', parent);
+  assert.equal(selected?.version, expectedVersion, 'actual plugin metadata must match the installed version');
+  assert.equal(realpathSync(selected.dir), realpathSync(join(expectedDirectory, 'node_modules/dsh-plus')));
+  const require = createRequire(parent);
+  assert.equal(JSON.parse(readFileSync(require.resolve('dsh-plus/package.json'), 'utf8')).version, expectedVersion);
+  assert.equal(realpathSync(require.resolve('dsh-plus')), realpathSync(join(selected.dir, 'src/plugin.mjs')));
+  assert.equal(realpathSync(require.resolve('dsh-plus/client')), realpathSync(join(selected.dir, 'lib/client.js')));
+  console.log(`Actual profile plugin resolution passed: ${expectedVersion}`);
+} finally { await ctx.fiber.dispose(); }
+'@
+    $previousNode = $env:ELECTRON_RUN_AS_NODE
+    try {
+        $env:ELECTRON_RUN_AS_NODE = '1'
+        & $Installed.FullName --expose-internals --input-type=module --eval $code (Join-Path $env:DSH_HOME 'profiles/desktop') (Join-Path $Installed.DirectoryName 'resources') $ExpectedVersion $ExpectedDirectory
+        if ($LASTEXITCODE -ne 0) { throw "Actual profile plugin resolution failed: $LASTEXITCODE" }
+    } finally { $env:ELECTRON_RUN_AS_NODE = $previousNode }
+}
+function Add-LegacyPluginShadow {
+    $directory = Join-Path $env:DSH_HOME 'profiles/desktop/node_modules/dsh-plus'
+    if (Test-Path $directory) { throw 'Legacy shadow fixture must not overwrite an existing package' }
+    New-Item (Join-Path $directory 'src') -ItemType Directory -Force | Out-Null
+    New-Item (Join-Path $directory 'lib') -ItemType Directory -Force | Out-Null
+    $metadata = '{"name":"dsh-plus","version":"0.1.6","type":"module","main":"./src/plugin.mjs","exports":{".":"./src/plugin.mjs","./client":"./lib/client.js","./package.json":"./package.json"}}'
+    Set-Content (Join-Path $directory 'package.json') $metadata -Encoding utf8NoBOM
+    Set-Content (Join-Path $directory 'src/plugin.mjs') 'export default true;' -Encoding utf8NoBOM
+    Set-Content (Join-Path $directory 'lib/client.js') 'export default true;' -Encoding utf8NoBOM
+}
 try {
     Install-Silently $installer.FullName
     $installed = Get-Installed '小角.exe'
     Assert-Plus $installed
     Write-Output "Fresh silent installation passed: $($installed.FullName)"
+    Add-LegacyPluginShadow
+    Assert-PluginResolution $installed '0.1.6' (Join-Path $env:DSH_HOME 'profiles/desktop')
+    Install-Silently $installer.FullName
+    Assert-Plus $installed
+    if (Test-Path (Join-Path $env:DSH_HOME 'profiles/desktop/node_modules/dsh-plus')) { throw 'Reinstall left a legacy physical plugin shadow' }
+    Write-Output 'Same-version reinstall repaired the legacy physical plugin and resolved the current version.'
 
     if ($PreviousInstaller) {
         if (-not (Test-Path $PreviousInstaller)) { throw 'Previous installer is missing' }

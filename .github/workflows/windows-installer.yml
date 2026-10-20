@@ -45,6 +45,8 @@ jobs:
           exit $LASTEXITCODE
       - name: Build full Windows installer and verify runtime
         run: npm run package:plus:win
+      - name: Verify plugin enrollment and legacy shadow migration
+        run: node --test scripts/desktop/plugin-bundle.test.mjs plugins/commander/test/plugin-install.test.mjs
       - name: Download previous installer for in-place upgrade verification
         env:
           GH_TOKEN: ${{ github.token }}
@@ -56,7 +58,7 @@ jobs:
           $previous = Join-Path $PWD 'previous/dsh-plus-0.1.3-win-x64-setup.exe'
           $expected = Get-Content previous/SHA256SUMS.txt | Where-Object { $_ -match '  dsh-plus-0.1.3-win-x64-setup.exe$' }
           if (-not $expected -or ($expected -split '\s+')[0] -ne (Get-FileHash $previous -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'Previous installer checksum mismatch' }
-      - name: Verify fresh install and DSH-Plus to 小角 in-place upgrade
+      - name: Verify fresh install, legacy plugin repair and in-place upgrade
         run: ./scripts/desktop/test-install-windows.ps1 -PreviousInstaller previous/dsh-plus-0.1.3-win-x64-setup.exe
       - name: Record verified artifact source
         run: |
@@ -72,7 +74,7 @@ jobs:
             const bytes = await readFile(`${directory}/${name}`);
             return { name, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
           }));
-          await writeFile(`${directory}/build-source.json`, JSON.stringify({ schemaVersion: 1, sourceSha: process.env.GITHUB_SHA, version: app.version, artifact, verified: ['packaged-runtime', 'fresh-install', 'legacy-upgrade'], files }, null, 2) + '\n');
+          await writeFile(`${directory}/build-source.json`, JSON.stringify({ schemaVersion: 1, sourceSha: process.env.GITHUB_SHA, version: app.version, artifact, verified: ['packaged-runtime', 'fresh-install', 'legacy-plugin-shadow-repair', 'actual-plugin-resolution', 'legacy-upgrade'], files }, null, 2) + '\n');
           '@ | node --input-type=module
           exit $LASTEXITCODE
       - name: Retain installer

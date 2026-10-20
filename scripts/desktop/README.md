@@ -5,13 +5,13 @@
 ## 目录与职责
 
 - `package-windows.mjs`：调用官方构建、运行时准备与 NSIS；不改官方源码。
-- `plugin-bundle.mjs`：以 npm 发布白名单复制插件与依赖，复用官方服务，首次安装启用组合 bundle。
+- `plugin-bundle.mjs`：以 npm 发布白名单复制插件与依赖，复用官方服务，安装时离线登记或升级组合 bundle；清理已确认身份的顶层旧插件遮蔽，保留更高版本与用户禁用选择。
 - `seal-runtime.mjs`：注入后通过官方 writer 重建完整文件哈希与共享包清单。
 - `electron-builder.config.mjs`：扩展官方配置，独立 appId / 产品名，预览关闭自动更新与强制升级策略；不引用官方更新服务。
 - `prepare-brand.mjs`：从 `assets/brand/` 生成小角 Windows、托盘、安装/卸载图标，官方源码保持不变。
 - `renderer/`：打包时通过官方文件映射替换初始化页面，只展示小角和工作台准备状态，通过已有 `dshWelcome.skip()` 进入工作台；失败可重试，不写入虚假凭据或登录状态。模型凭据在工作台内配置。
 - `smoke-windows.mjs`：验证打包资源、官方 Host 启动、离线配对 profile 初始化与认证 Link 管理接口。
-- `test-install-windows.ps1`：CI 静默安装并检查用户 profile 已启用 Plus。
+- `test-install-windows.ps1`：CI 静默安装、旧实体残留重装修复与原位升级；通过官方解析器验证实际插件元数据、入口及客户端路径。
 
 官方完整运行时放在 `resources/app.asar/dsh`，Windows 物理文件解包到 `resources/app.asar.unpacked/dsh`。额外安装初始化脚本放在 `resources/dsh-plus/`。构建产物按 `artifacts/windows/` 分类，不提交二进制。
 

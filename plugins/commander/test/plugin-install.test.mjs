@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile, rm, symlink, realpath, readdir } from 'node:fs/promises';
-import { createRequire } from 'node:module';
+import * as filesystem from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, symlink, realpath, readdir, lstat } from 'node:fs/promises';
+import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import * as tar from 'tar';
@@ -59,6 +60,72 @@ test('disabled plugin remains disabled during upgrade and rollback', async t => 
   await activateRelease({ profile, release: await prepareRelease(await seed('0.1.1')) });
   assert.equal((await getInstallState(profile)).enabled, false);
   assert.equal((await rollbackRelease({ profile })).enabled, false);
+});
+
+test('a running plugin cannot silently activate over a legacy physical package', async t => {
+  const { profile, seed, put } = await fixture(t);
+  const first = await prepareRelease(await seed('0.1.6'));
+  await activateRelease({ profile, release: first, enabled: true });
+  const before = await readFile(join(profile, 'package.json'), 'utf8');
+  await put('profile/node_modules/dsh-plus/package.json', { name: 'dsh-plus', version: '0.1.6' });
+  await put('profile/node_modules/dsh-plus/keep.txt', 'old plugin files');
+  const next = await prepareRelease(await seed('0.1.9'));
+  await assert.rejects(activateRelease({ profile, release: next }), /关闭小角/);
+  assert.equal(await readFile(join(profile, 'package.json'), 'utf8'), before);
+  assert.equal(await readFile(join(profile, 'node_modules/dsh-plus/keep.txt'), 'utf8'), 'old plugin files');
+});
+
+test('offline migration removes a legacy junction without deleting its target or the previous release', async t => {
+  const { root, profile, seed, put } = await fixture(t);
+  const first = await prepareRelease(await seed('0.1.6'));
+  await activateRelease({ profile, release: first, enabled: true });
+  await put('external-plugin/package.json', { name: 'dsh-plus', version: '0.1.6' });
+  await put('external-plugin/keep.txt', 'preserve linked target');
+  await symlink(join(root, 'external-plugin'), join(profile, 'node_modules/dsh-plus'), process.platform === 'win32' ? 'junction' : 'dir');
+  const next = await prepareRelease(await seed('0.1.9'));
+  await activateRelease({ profile, release: next, migrateLegacy: true });
+  await assert.rejects(lstat(join(profile, 'node_modules/dsh-plus')), { code: 'ENOENT' });
+  assert.equal(await readFile(join(root, 'external-plugin/keep.txt'), 'utf8'), 'preserve linked target');
+  assert.equal(JSON.parse(await readFile(join(first.pluginPath, 'package.json'))).version, '0.1.6');
+  assert.equal((await rollbackRelease({ profile })).version, '0.1.6');
+  assert.equal((await readdir(join(profile, '.dsh-plus'))).some(name => name.startsWith('.legacy-')), false);
+});
+
+test('offline migration refuses an unrecognized package at the plugin location', async t => {
+  const { profile, seed, put } = await fixture(t);
+  const release = await prepareRelease(await seed('0.1.9'));
+  const before = await readFile(join(profile, 'package.json'), 'utf8');
+  await put('profile/node_modules/dsh-plus/package.json', { name: 'user-owned-package', version: '1.0.0' });
+  await put('profile/node_modules/dsh-plus/keep.txt', 'user data');
+  await assert.rejects(activateRelease({ profile, release, migrateLegacy: true }), /原文件已保留/);
+  assert.equal(await readFile(join(profile, 'package.json'), 'utf8'), before);
+  assert.equal(await readFile(join(profile, 'node_modules/dsh-plus/keep.txt'), 'utf8'), 'user data');
+});
+
+test('failed manifest commit restores the legacy plugin and leaves the selected version unchanged', async t => {
+  const { profile, seed, put } = await fixture(t);
+  const first = await prepareRelease(await seed('0.1.6'));
+  await activateRelease({ profile, release: first, enabled: true });
+  const before = await readFile(join(profile, 'package.json'), 'utf8');
+  await put('profile/node_modules/dsh-plus/package.json', { name: 'dsh-plus', version: '0.1.6' });
+  await put('profile/node_modules/dsh-plus/keep.txt', 'restore old files');
+  const next = await prepareRelease(await seed('0.1.9'));
+  const builtin = createRequire(import.meta.url)('node:fs/promises');
+  const rename = builtin.rename;
+  t.mock.method(builtin, 'rename', async (source, destination) => {
+    if (destination === join(profile, 'package.json')) {
+      await assert.rejects(filesystem.lstat(join(profile, 'node_modules/dsh-plus')), { code: 'ENOENT' });
+      throw Object.assign(new Error('simulated manifest commit failure'), { code: 'EIO' });
+    }
+    return rename(source, destination);
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(activateRelease({ profile, release: next, migrateLegacy: true }), /simulated manifest commit failure/);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
+  assert.equal(await readFile(join(profile, 'package.json'), 'utf8'), before);
+  assert.equal(await readFile(join(profile, 'node_modules/dsh-plus/keep.txt'), 'utf8'), 'restore old files');
+  assert.equal((await readdir(join(profile, '.dsh-plus'))).some(name => name.startsWith('.legacy-')), false);
 });
 
 test('activation coordinates with official plugin-manager writers and preserves their completed changes', async t => {

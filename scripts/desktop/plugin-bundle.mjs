@@ -124,7 +124,7 @@ export function stagePluginBundle({ runtime, output, plugin = resolve(import.met
   }
 }
 
-/** Enable Plus once; preserve user bundles, patches, dependencies and later disable/recovery choices. */
+/** Enroll or upgrade Plus offline; preserve user settings and later disable/recovery choices. */
 export async function initializePluginProfile({ runtime, resources, profile, seed }) {
   runtime = resolve(runtime ?? [join(resources, 'app.asar.unpacked', 'dsh'), join(resources, 'app.asar', 'dsh')].find(path => existsSync(join(path, 'node_modules/@deepseek-ai/dsh-app-boot/package.json'))) ?? join(resources, 'app.asar.unpacked', 'dsh'));
   if (existsSync(join(runtime, 'node_modules', PLUS, 'package.json'))) throw new Error('DSH-Plus: 此应用仍内置锁定插件，请安装新版桌面应用以迁移');
@@ -160,7 +160,7 @@ export async function initializePluginProfile({ runtime, resources, profile, see
     const now = await getInstallState(profile);
     if (now.managed && compareVersions(now.version, seedMetadata.version) >= 0) {
       const refreshed = await prepareRelease({ directory: seed, root: now.root, version: now.version, runtime });
-      const state = await activateRelease({ profile, release: refreshed, appVersion: seedMetadata.version });
+      const state = await activateRelease({ profile, release: refreshed, appVersion: seedMetadata.version, migrateLegacy: true });
       return { profile, enrolled: false, reason: 'already-enrolled', ...state };
     }
     if (!existsSync(manifestPath)) boot.initProfile(profile, boot.PROFILE_TEMPLATES.web.bundles);
@@ -170,7 +170,7 @@ export async function initializePluginProfile({ runtime, resources, profile, see
     const previouslyEnabled = bundles.some(name => [PLUS, LEGACY_PLUS, COMPOSITION].includes(name) || name.startsWith('@dsh-plus/desktop-'));
     const enabled = now.managed ? now.enabled : enrolled ? previouslyEnabled : true;
     const release = await prepareRelease({ directory: seed, root: join(profile, '.dsh-plus', 'releases'), version: seedMetadata.version, runtime });
-    const state = await activateRelease({ profile, release, enabled, appVersion: seedMetadata.version });
+    const state = await activateRelease({ profile, release, enabled, appVersion: seedMetadata.version, migrateLegacy: true });
     writeJson(marker, { schemaVersion: 2, package: PLUS, bundle: state.bundleName, version: state.version });
     return { profile, enrolled: !enrolled, reason: enrolled ? 'migrated' : 'enabled', ...state };
   } finally {
