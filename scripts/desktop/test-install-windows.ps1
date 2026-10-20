@@ -153,7 +153,9 @@ try {
     $previousNode = $env:ELECTRON_RUN_AS_NODE
     try {
         $env:ELECTRON_RUN_AS_NODE = '1'
-        & $Installed.FullName --expose-internals --input-type=module --eval $code (Join-Path $env:DSH_HOME 'profiles/desktop') (Join-Path $Installed.DirectoryName 'resources') $ExpectedVersion $ExpectedDirectory
+        # Electron is a GUI-subsystem executable: a pipeline makes PowerShell
+        # wait for Node-mode verification before reading its native exit code.
+        & $Installed.FullName --expose-internals --input-type=module --eval $code (Join-Path $env:DSH_HOME 'profiles/desktop') (Join-Path $Installed.DirectoryName 'resources') $ExpectedVersion $ExpectedDirectory | Out-Host
         if ($LASTEXITCODE -ne 0) { throw "Actual profile plugin resolution failed: $LASTEXITCODE" }
     } finally { $env:ELECTRON_RUN_AS_NODE = $previousNode }
 }
