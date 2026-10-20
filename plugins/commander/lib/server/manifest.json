@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "harnessVersion": "0.2.1-alpha.3",
   "harnessCommit": "571902028a75c64c1d767f4ae5fd099485f0ddf0",
-  "pluginVersion": "0.1.9",
-  "bundle": "@dsh-plus/desktop-51236fb3aface1b9",
-  "sha256": "801f15044c3f58828de87851903574038217126bc50cce0a04fdfd87664854c3"
+  "pluginVersion": "0.1.10",
+  "bundle": "@dsh-plus/desktop-8a448394dabf3721",
+  "sha256": "c7135dc60b6615040d43e070c562b891ed4830fd721dc48202b63210e69a8a11"
 }
