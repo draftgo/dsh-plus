@@ -137,6 +137,14 @@ npm run test:commander
 npm --prefix plugins/commander run test:native
 ```
 
+真实 Harness 启动回归（需已准备官方依赖和含 dsh-plus 的 web profile node_modules）：
+
+```sh
+node plugins/commander/test/live-startup.mjs
+```
+
+该检查使用临时用户目录，验证认证接口、强杀后的旧锁恢复、会话保留和损坏数据诊断，不启动 GUI、不调用模型。可用 `COMMANDER_TEST_NODE` 与 `COMMANDER_HARNESS_NODE_MODULES` 指定现有 Node 和 profile 依赖路径；结束后删除测试目录。
+
 默认原生测试仅启动真实 Codex 并握手，不调用模型。选择其他工具或进行真实付费模型验证需显式设置：
 
 ```sh
@@ -165,7 +173,7 @@ Harness 端通过官方 `userQuestions` 服务桥接 Codex / Pi / OpenCode 的�
 
 OpenCode **仅适配 v1**，主动拒绝 v2；需要安装现有 CLI，插件不会下载四套工具。跨服务重启时会话先标记 disconnected，用户显式连接，不自动重跑任务。外部程序正在写入的会话不保证能探测，不能承诺任意进程热接管。
 
-回放只保留最近事件，游标断档时返回 truncated；长期完整历史由各原生引擎负责。异常退出可能留下 owner.lock，先核对其中主机与 PID 已无运行进程，再人工删除锁文件；不要删除仍在使用的锁。
+回放只保留最近事件，游标断档时返回 truncated；长期完整历史由各原生引擎负责。异常退出留下的 owner.lock 在下次启动时自动检查；仅本机合法 PID 且系统确认进程已退出才安全回收，保留会话文件。存活进程、权限不足、跨主机或损坏锁均保留并报告原因，不按超时强制删锁。存储或侧栏初始化失败通过认证接口返回 HTTP 503 和具体原因；不要删除仍在使用的锁。
 
 插件禁用或 Host 退出会停止它持有的进程；仅客户端关闭连接才保留后台任务。日志和会话内容存储在本机，仍可能包含敏感输出，应保护整个数据目录。
 

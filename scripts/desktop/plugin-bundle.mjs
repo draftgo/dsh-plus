@@ -2,7 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, openSync, closeSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 const helperBase = existsSync(fileURLToPath(new URL('./shared/plugin-install.mjs', import.meta.url))) ? './shared/' : '../../plugins/commander/shared/';
@@ -63,6 +63,8 @@ export function stagePluginBundle({ runtime, output, plugin = resolve(import.met
     const metadata = readJson(join(source, 'package.json'));
     const optional = metadata.optionalDependencies ?? {};
     for (const [name, spec] of Object.entries({ ...metadata.dependencies, ...optional })) {
+      // ssh2 falls back to JS; omit the build machine's optional Node ABI addon.
+      if (metadata.name === 'ssh2' && name === 'cpu-features') { omitted.add(name); continue; }
       if (sharedPackage(name)) { assertShared(name, spec); continue; }
       let dependency;
       try { dependency = findPackage(name, source); }
@@ -79,6 +81,7 @@ export function stagePluginBundle({ runtime, output, plugin = resolve(import.met
       cpSync(dependency, output, { recursive: true, dereference: true, filter: path => {
         if (path === dependency) return true;
         const relative = path.slice(dependency.length + 1);
+        if (name === 'ssh2' && (relative === join('lib', 'protocol', 'crypto', 'build') || relative.startsWith(join('lib', 'protocol', 'crypto', 'build') + sep))) return false;
         return !relative.split(/[\\/]/u).includes('node_modules') && !/\.(?:[cm]?[jt]s|css)\.map$|\.tsbuildinfo$/u.test(relative);
       } });
       copied.add(name);

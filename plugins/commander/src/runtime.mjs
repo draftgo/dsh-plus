@@ -33,19 +33,25 @@ export class Commander extends EventEmitter {
 
   async open() {
     const data = await this.store.open();
-    if (data.version !== 1 || !Array.isArray(data.sessions)) { await this.store.close(); throw new Error('Unsupported DSH-Plus state format'); }
-    for (const record of data.sessions) {
-      if (['running', 'waiting', 'connecting'].includes(record.status)) {
-        for (const entry of Object.values(record.receipts)) {
-          if (entry.receipt.turnId === record.turnId) entry.receipt.status = 'uncertain';
+    try {
+      if (!data || data.version !== 1 || !Array.isArray(data.sessions)) throw new Error('Unsupported DSH-Plus state format');
+      for (const record of data.sessions) {
+        if (['running', 'waiting', 'connecting'].includes(record.status)) {
+          for (const entry of Object.values(record.receipts)) {
+            if (entry.receipt.turnId === record.turnId) entry.receipt.status = 'uncertain';
+          }
         }
+        record.status = record.archived ? 'closed' : 'disconnected';
+        if (!record.route) record.routeMode = 'native-unbound';
+        record.pendingApprovals = [];
+        this.sessions.set(record.id, record);
       }
-      record.status = record.archived ? 'closed' : 'disconnected';
-      if (!record.route) record.routeMode = 'native-unbound';
-      record.pendingApprovals = [];
-      this.sessions.set(record.id, record);
+      return this;
+    } catch (error) {
+      this.sessions.clear();
+      await this.store.close();
+      throw error;
     }
-    return this;
   }
 
   healthy() {

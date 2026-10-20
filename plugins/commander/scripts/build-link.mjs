@@ -1,10 +1,25 @@
 import { build } from 'esbuild';
-import { cp, mkdir } from 'node:fs/promises';
+import { cp, mkdir, rm } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { writeLinkLicenses } from './link-licenses.mjs';
 import { fileURLToPath } from 'node:url';
 
+// A rejected addon can still introduce another libnode and crash on process exit.
+// Remove only generated optional artifacts; ssh2 already has a complete JS fallback.
+export async function prepareSshRuntime(packageFile) {
+  const require = createRequire(packageFile);
+  const ssh = require.resolve('ssh2/package.json');
+  await rm(join(dirname(ssh), 'lib/protocol/crypto/build'), { recursive: true, force: true });
+  let cpu;
+  try { cpu = createRequire(ssh).resolve('cpu-features/package.json'); }
+  catch (error) { if (error.code !== 'MODULE_NOT_FOUND') throw error; }
+  if (cpu) await rm(join(dirname(cpu), 'build'), { recursive: true, force: true });
+}
+
 /** Ship Link inside the plugin artifact; no sibling checkout is needed at runtime. */
 export async function buildLink() {
+  for (const packageFile of [new URL('../package.json', import.meta.url), new URL('../../link/package.json', import.meta.url)]) await prepareSshRuntime(packageFile);
   await import('../../link/scripts/build-web.mjs');
   const output = new URL('../lib/', import.meta.url);
   await mkdir(output, { recursive: true });

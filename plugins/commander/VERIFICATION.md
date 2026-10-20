@@ -1,5 +1,14 @@
 # DSH-Plus 验证记录
 
+## 2026-10-20 Windows 侧栏 404 与陈旧锁恢复
+
+- 用户截图明确显示 Stale DSH-Plus owner.lock；真实子进程强杀后复现旧逻辑拒绝已退出 PID 的锁，导致 Commander 在注册后端接口前失败。重装保留用户目录，故干净安装 smoke 通过不能排除该问题。
+- 锁回收复用官方短时文件锁串行化，仅本机合法 PID 且 ESRCH 才接管；覆盖活跃 owner、五进程竞争、权限不足、旧格式锁、继任者保护、损坏会话与 hydration 失败清理。不删除用户会话，不以超时强制接管。
+- Commander 全套 375/375、桌面相关测试 20/20 通过；build:plus、根 check、Windows smoke 语法检查与 diff whitespace 检查通过。新增真实启动脚本不属于默认单测，单独执行。
+- `node plugins/commander/test/live-startup.mjs` 在隔离 HOME/USERPROFILE 和默认 .dowork/commander 数据目录运行真实官方 CLI + Cordis + Connection：认证 state / ensureRecent 正常；SIGKILL 留锁后转换旧版锁格式，同目录重启返回 200，会话 ID / 原生句柄保留，读取阶段 sessions.json 字节不变。
+- 同一真实 Harness 流程注入损坏 dismissed-harness.json 与 sessions.json：认证侧栏接口返回 JSON 503 / COMMANDER_UNAVAILABLE，前者 no-store；原始损坏字节保留，存储初始化失败释放本次所有权。不会用空列表伪装启动成功。临时进程与目录均已清理，未调用模型或启动 GUI。
+- Windows packaged smoke 已补强杀后同默认用户目录重启与数据保留，但本轮尚未在原生 Windows 安装包执行；上述真实运行验证环境为 Linux，不宣称已经修复用户已安装的旧包。本轮尚未重新构建或发布 exe / APK。官方子模块未修改。
+
 ## 2026-10-18 · 移动会话、扫码与更新交互修复
 
 - 移动抽屉延后一帧关闭，避免原生点击监听的微任务先于 React 委托导航卸载点击目标；保留官方会话选择与路由。模型名称持续显示，窄屏限宽省略，完整名称保留在 title。Windows 应用菜单两态统一起点；移动新会话辅助面板入口取消桌面负边距，并尊重安全区域。
@@ -249,3 +258,20 @@ node --test plugins/commander/test/commands.test.mjs plugins/commander/test/runt
 - Node 环境、安装生命周期、工具设置交互、owner 接口、登录、Codex 协议与会话路由合计 70/70 定向测试通过。
 - Linux x64 真实联网隔离测试：空 PATH、禁用宿主 Node 复用，从国内镜像下载并校验 Node.js，再安装 Codex；安装及重新创建安装器后均能执行 codex-cli 0.163.0。临时安装环境已删除。CLI 在 /tmp 下提示不创建辅助别名，版本与启动验证正常；不将该警告当失败。
 - 插件及 Android 构建、资源字节校验完成后交付；Windows/macOS 尚无真实安装验收。未提交、发布或启动图形应用，官方子模块未修改；本次两个协作子任务已结束。
+
+
+## 2026-10-20 Web 502 与 SSH 原生扩展隔离
+
+- 线上 systemd 多次退出 status=11/SEGV，重启期间上游端口不可用。服务 Node.js 24.22.0（ABI137）却载入以系统 Node.js 22.22.1（ABI127）构建并链接 libnode.so.127 的 SSH 加速和 CPU 检测模块。隔离空脚本 6/6 正常、导入 ssh2 6/6 SIGSEGV；仅去掉 sshcrypto 不足，cpu-features 也必须移除。
+- 仅隔离两个可选构建物至忽略的修复备份目录并重启，用户数据未删除。构建脚本持久化清理生成目录，桌面发行过滤 SSH crypto/build 与 cpu-features，使用现有 ssh2 JS/Node crypto 回退；未修改第三方或官方源码，SSH/MCP/OpenAPI 契约不变。
+- 生产 Node 定向测试 18/18：生成物清理与重复执行、发行包不含两个 ABI 扩展、真实 SSH 指纹验证/认证、命令执行和双向隧道通过。build:plus 成功；实际构建的 Link 导入正常退出，未载入另一套 libnode。隔离真实 Harness 启动/强杀恢复/诊断脚本通过。
+- 重启后本机认证首页、侧栏 state、ensureRecent 和更新 status 均 HTTP 200；原有 14 个会话仍在，进程 maps 无 libnode.so.127 或两种可选扩展。站点现有 IP 白名单使本机经域名访问为 403，未改变访问边界或将其称为外网端到端验收。
+- 此处恢复的是服务器实例；Windows 已激活插件可在修复版发布后通过插件更新并重启，后端启动失败使更新 API 也缺失的旧客户端需新版 Windows 应用恢复。连接主机的手机只需重连/刷新，不因本轮服务端修复重装 APK。新修复尚未重新打包发布，不声称旧客户端已自动获得。
+
+
+## 2026-10-20 更新红点与组件状态一致性
+
+- 复现服务器插件已是 0.1.8，清单插件仍 0.1.8，但 current.app 缺失被 !currentApp 当成 Windows 应用有更新，混合红点与插件“最新”文案矛盾。服务器不参与桌面应用比较；仅已知当前版本且严格更高才提示组件更新，应用明确标注，待重启不重复安装，未知/未检查/失败不声称最新。
+- 定向更新测试 44/44，最终生产 Node 插件全套 384/384、桌面 21/21、build:plus、根 check 与 whitespace 检查通过。UI 交互由现有 jsdom 测试验证，按约定未做视觉验收。
+- 确认无运行或待确认任务后重启服务器。真实认证签名更新检查 phase=idle、无错误，plugin.available=false、app.available=false、restartRequired=false；首页与侧栏 200，页面实际声明的合并插件资源完整包含最新客户端字节。服务重启后 NRestarts=0。
+- 修复已部署到本机服务器；尚未递增发行版本、重新打包或发布 Windows/APK/插件通道，用户安装的旧客户端不会凭刷新自动得到本地插件修复。连接本服务器的网页/手机刷新工作台即可获得该主机版本。所有本轮子代理均已结束，测试临时目录清理完毕。

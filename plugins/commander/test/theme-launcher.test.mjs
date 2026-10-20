@@ -63,20 +63,22 @@ for (const [preference, scheme] of [['light', 'light'], ['dark', 'dark'], ['syst
   });
 }
 
-test('wide and rail footer keep theme, update and usage shortcuts in order', () => {
+test('wide and rail footer keep shortcuts ordered and open GitHub in the external browser', () => {
   const source = readFileSync(new URL('../client/index.jsx', import.meta.url), 'utf8');
   const code = transformSync(source + '\nexport { SettingsLauncher };', { loader: 'jsx', format: 'cjs' }).code;
   const UsageLauncher = () => null;
   const UpdateLauncher = () => null;
+  const LinkIconMedium = () => null;
   const Stub = () => null;
+  const opened = [];
   const module = { exports: {} };
-  runInNewContext(code, { module, exports: module.exports, require: id => {
+  runInNewContext(code, { module, exports: module.exports, window: { open: (...args) => opened.push(args) }, require: id => {
     if (id === 'react') return { ...React, useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot() };
     if (id === './theme-launcher.jsx') return { ThemeLauncher };
     if (id === './usage.jsx') return { UsageLauncher, UsageDialog: Stub };
     if (id === './updates.jsx') return { UpdateLauncher };
     if (id === './iconsax.jsx') return { UIIcon: Stub };
-    if (id === '@deepseek-ai/dsh-client-ui-primitives') return { Tooltip: Stub };
+    if (id === '@deepseek-ai/dsh-client-ui-primitives') return { Tooltip: Stub, LinkIconMedium };
     return {};
   } });
   for (const wide of [true, false]) {
@@ -88,7 +90,21 @@ test('wide and rail footer keep theme, update and usage shortcuts in order', () 
     assert.equal(children[position + 1].type, UpdateLauncher);
     assert.equal(children[position + 2].type, UsageLauncher);
     assert.equal(children[position].props.theme, theme);
+    assert.equal(tree.props.className.includes('cmd-settings-row-rail'), !wide);
+    const github = children.at(-1);
+    assert.equal(github.props.label, 'GitHub');
+    const button = github.props.children;
+    assert.equal(button.type, 'button');
+    assert.equal(button.props.type, 'button');
+    assert.equal(button.props.className, 'cmd-archive-launcher');
+    assert.equal(button.props['aria-label'], '在浏览器中打开 GitHub 项目');
+    assert.equal(button.props.children.type, LinkIconMedium);
+    assert.equal(button.props.children.props.kind, 'url');
+    assert.equal(button.props.children.props.href, 'https://github.com/draftgo/dsh-plus');
+    button.props.onClick();
+    assert.deepEqual(opened.at(-1), ['https://github.com/draftgo/dsh-plus', '_blank', 'noopener,noreferrer']);
   }
+  assert.equal(opened.length, 2);
   const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert(manifest.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-theme'));
 });

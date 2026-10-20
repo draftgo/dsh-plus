@@ -102,6 +102,10 @@ function Assert-Plus([System.IO.FileInfo]$Installed) {
     if (-not (Test-Path (Join-Path $env:DSH_HOME "profiles/desktop/node_modules/$($state.bundleName)/package.json"))) { throw 'The profile-local plugin wrapper is missing' }
     if (-not (Test-Path (Join-Path $Installed.DirectoryName 'resources/dsh-plus/plugin-bundle.mjs'))) { throw 'The offline plugin bootstrap is missing' }
     if (-not (Test-Path (Join-Path $Installed.DirectoryName 'resources/dsh-plus/seed/release.json'))) { throw 'The offline plugin seed is missing' }
+    $seed = Get-Content (Join-Path $Installed.DirectoryName 'resources/dsh-plus/seed/release.json') -Raw | ConvertFrom-Json
+    if (-not $seed.version -or $state.version -ne $seed.version) { throw "Installed profile plugin version $($state.version) does not match installer seed $($seed.version)" }
+    $plugin = Get-Content (Join-Path $state.directory 'node_modules/dsh-plus/package.json') -Raw | ConvertFrom-Json
+    if ($plugin.name -ne 'dsh-plus' -or $plugin.version -ne $seed.version) { throw "Active plugin payload version $($plugin.version) does not match installer seed $($seed.version)" }
     if (Test-Path (Join-Path $Installed.DirectoryName 'resources/app.asar.unpacked/dsh/node_modules/dsh-plus/package.json')) { throw 'DSH-Plus must be external to the sealed engine runtime' }
     if ($Installed.VersionInfo.ProductName -ne '小角') { throw 'Executable product name is not 小角' }
     $entries = @(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' | Where-Object { $_.InstallLocation -eq $Installed.DirectoryName })

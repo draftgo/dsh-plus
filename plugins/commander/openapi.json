@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "DSH-Plus Harness 工具管理",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "官方 owner 通道的侧栏状态与工具设置接口；已配对工作台仅通过 Link 既有转发白名单访问。工具安装与本机配置写入仍受对应权限限制，不通过 MCP 向 Agent 暴露安装或配置写入权限。"
   },
   "servers": [
@@ -164,6 +164,28 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DSH-Plus 存储或侧栏初始化失败（含数据目录占用、无法确认旧锁持有者或损坏持久状态）；明确报告原因，保留已有数据，不返回空会话或缺失路由 404。修复原因后需重启主机。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "code"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "const": "COMMANDER_UNAVAILABLE"
+                    }
+                  }
                 }
               }
             }

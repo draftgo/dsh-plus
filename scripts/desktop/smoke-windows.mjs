@@ -1,6 +1,7 @@
 import { readFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { tmpdir, hostname } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { smokePreparedRuntime } from '../../deepseek-harness/apps/desktop/scripts/smoke-prepared-runtime.ts';
@@ -28,14 +29,16 @@ try {
   await readFile(join(profile, 'node_modules', state.bundleName, 'package.json'));
   const inventory = JSON.parse(await readFile(join(resources, 'app.asar.unpacked/dsh/desktop-runtime.json')));
   if (inventory.sharedPackages.some(item => item.name === 'dsh-plus' || item.name === '@dowork/dsh-plus-desktop')) throw new Error('Plugin is still locked inside the sealed engine');
-  await writeFile(join(profile, 'cordis.patch.yml'), `- id: webserver\n  config:\n    host: 127.0.0.1\n    port: 0\n- id: commander\n  config:\n    dataDir: ${JSON.stringify(join(temporary, 'commander'))}\n`);
-  host = new DesktopHostProcess(executable, join(resources, 'app.asar', 'dsh'), profile, undefined, environment, undefined, join(resources, 'runtime/primary-runtime'), { pnpm: join(resources, 'runtime/primary-runtime/dependencies/pnpm/bin/pnpm.mjs'), nodeBin: join(resources, 'runtime/bin') });
+  // Use the shipped default dataDir under the isolated user's home, as real installs do.
+  await writeFile(join(profile, 'cordis.patch.yml'), `- id: webserver\n  config:\n    host: 127.0.0.1\n    port: 0\n`);
+  const makeHost = () => new DesktopHostProcess(executable, join(resources, 'app.asar', 'dsh'), profile, undefined, environment, undefined, join(resources, 'runtime/primary-runtime'), { pnpm: join(resources, 'runtime/primary-runtime/dependencies/pnpm/bin/pnpm.mjs'), nodeBin: join(resources, 'runtime/bin') });
+  host = makeHost();
   let deadline;
   let ready;
   try { ready = await Promise.race([host.start(), new Promise((_, reject) => { deadline = setTimeout(() => reject(new Error('Packaged Plus Host startup exceeded 120 seconds')), 120_000); })]); }
   finally { clearTimeout(deadline); }
   const login = await fetch(ready.url, { redirect: 'manual' });
-  const cookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
+  let cookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
   const response = await fetch(new URL('/api/commander-link', ready.url), { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'status' }) });
   const status = await response.json();
   if (!response.ok || status.enabled !== false) throw new Error(`Packaged Plus management route failed: ${JSON.stringify(status)}`);
@@ -53,5 +56,33 @@ try {
   const font = await fetch(new URL('/api/commander-fonts/' + fontManifest[0].file, ready.url), { headers: { cookie } });
   if (!font.ok || Buffer.from(await font.arrayBuffer()).subarray(0, 4).toString() !== 'wOF2') throw new Error('Packaged sidebar font could not be loaded');
   console.log('Packaged authenticated sidebar state, recent workspace recovery and font asset passed.');
+  const dataDir = join(temporary, '.dowork', 'commander');
+  const lockPath = join(dataDir, 'owner.lock');
+  const owner = JSON.parse(await readFile(lockPath, 'utf8'));
+  if (owner.host !== hostname() || !Number.isSafeInteger(owner.pid) || owner.pid < 1 || owner.pid === process.pid) throw new Error('Unexpected packaged Host owner record');
+  process.kill(owner.pid, 'SIGKILL');
+  const exitedBy = Date.now() + 15_000;
+  for (;;) {
+    try { process.kill(owner.pid, 0); }
+    catch (error) { if (error.code === 'ESRCH') break; throw error; }
+    if (Date.now() > exitedBy) throw new Error('Killed packaged Host did not exit');
+    await delay(50);
+  }
+  // The old Host is dead; keep the legacy lock format to exercise existing installations.
+  host = undefined;
+  await writeFile(lockPath, JSON.stringify({ pid: owner.pid, host: owner.host }));
+  const fixture = { version: 1, sessions: [{ id: 'crash-recovery-check', provider: 'codex', cwd: temporary, status: 'disconnected', archived: false, cursor: 0, events: [], receipts: {}, pendingApprovals: [], nativeId: 'preserved-native-handle' }] };
+  const saved = JSON.stringify(fixture);
+  await writeFile(join(dataDir, 'sessions.json'), saved);
+  host = makeHost();
+  try { ready = await Promise.race([host.start(), new Promise((_, reject) => { deadline = setTimeout(() => reject(new Error('Packaged Host crash recovery exceeded 120 seconds')), 120_000); })]); }
+  finally { clearTimeout(deadline); }
+  const recoveredLogin = await fetch(ready.url, { redirect: 'manual' });
+  cookie = recoveredLogin.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
+  const recovered = await sidebarCall({ action: 'state' });
+  if (!recovered.sessions.some(session => session.id === 'crash-recovery-check' && session.nativeId === 'preserved-native-handle')) throw new Error('Packaged Host lost sessions after crash recovery');
+  if (await readFile(join(dataDir, 'sessions.json'), 'utf8') !== saved) throw new Error('Crash recovery rewrote saved sessions');
+  if (!(await sidebarCall({ action: 'ensureRecent' })).workspaceId) throw new Error('Packaged sidebar recent workspace failed after crash recovery');
+  console.log('Packaged Host forced-exit recovery with legacy owner.lock, default user dataDir and preserved sessions passed.');
   console.log('Packaged DSH runtime, offline Plus enrollment and authenticated Link management passed.');
 } finally { try { await host?.stop(); } finally { await rm(temporary, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }); } }

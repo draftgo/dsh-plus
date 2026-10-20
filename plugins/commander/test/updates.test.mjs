@@ -12,6 +12,7 @@ async function fixture(t, options = {}) {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
   const artifact = Buffer.from('verified plugin bytes');
   const manifest = { schemaVersion: 1, version: options.version || '0.1.3', engine: options.engine || { min: '1.2.3', max: '1.2.3' }, plugin: { version: options.version || '0.1.3', url: 'https://github.com/draftgo/dsh-plus/releases/download/plugin-v0.1.3/dsh-plus-0.1.3-plugin.tar.gz', size: artifact.length, sha256: createHash('sha256').update(artifact).digest('hex') } };
+  if (options.appVersionInFeed) manifest.app = { version: options.appVersionInFeed, url: `https://github.com/draftgo/dsh-plus/releases/download/v${options.appVersionInFeed}/xiaojiao-setup.exe` };
   const bytes = Buffer.from(JSON.stringify(manifest)), signature = sign(null, bytes, privateKey).toString('base64');
   const state = { managed: true, root: join(directory, 'releases'), version: '0.1.2', appVersion: '0.1.2', previous: '0.1.1', ...options.state };
   let activated = 0, busy = false, downloads = 0;
@@ -29,7 +30,7 @@ async function fixture(t, options = {}) {
     if (options.beforeDownload) await options.beforeDownload(() => { busy = true; });
     return new Response(options.corrupt ? 'wrong bytes' : artifact);
   };
-  const service = await createUpdates({ directory, profile: directory, runtime: directory, version: '0.1.2', engineVersion: '1.2.3', appVersion: options.appVersion, publicKey: publicKey.export({ type: 'spki', format: 'pem' }), fetcher, install, installation: options.installation || 'desktop', isBusy: () => busy });
+  const service = await createUpdates({ directory, profile: directory, runtime: directory, version: options.currentVersion || '0.1.2', engineVersion: '1.2.3', appVersion: options.appVersion, publicKey: publicKey.export({ type: 'spki', format: 'pem' }), fetcher, install, installation: options.installation || 'desktop', isBusy: () => busy });
   t.after(() => service.close());
   return { service, directory, state, setBusy: value => { busy = value; }, activated: () => activated, downloads: () => downloads };
 }
@@ -44,6 +45,7 @@ test('signed check, verified install, persistence and restart state form one com
   await f.service.dispatch({ action: 'install' }); await f.service.settled();
   const status = await f.service.status();
   assert.equal(f.activated(), 1); assert.equal(status.restartRequired, true); assert.equal(status.current.plugin, '0.1.2'); assert.equal(status.current.app, '0.1.2');
+  assert.equal(status.release.plugin.available, false, 'a staged update is waiting for restart, not another installation');
   await assert.rejects(f.service.dispatch({ action: 'install' }), /重启/);
 });
 
@@ -51,6 +53,47 @@ test('actual app metadata takes priority over a marker containing the plugin ver
   const f = await fixture(t, { appVersion: '0.1.3', state: { appVersion: '0.1.4' } });
   assert.equal((await f.service.status()).current.app, '0.1.3');
   assert.equal((await f.service.status()).current.plugin, '0.1.2');
+});
+
+test('a current server plugin and unknown desktop version do not become an application update', async t => {
+  const f = await fixture(t, { version: '0.1.8', currentVersion: '0.1.8', appVersionInFeed: '0.1.6', installation: 'server', state: { version: '0.1.8', appVersion: null, managed: false } });
+  await f.service.dispatch({ action: 'check' }); await f.service.settled();
+  const status = await f.service.status();
+  assert.equal(status.current.app, undefined);
+  assert.equal(status.release.plugin.available, false);
+  assert.equal(status.release.app.available, false);
+  assert.equal(status.restartRequired, false);
+  assert.equal(status.canInstall, false);
+});
+
+test('application updates require a known installed desktop version and a strictly newer release', async t => {
+  for (const [appVersion, expected] of [[undefined, false], [null, false], ['0.1.6', false], ['0.1.7', false], ['0.1.5', true]]) {
+    const f = await fixture(t, { version: '0.1.2', appVersionInFeed: '0.1.6', state: { appVersion } });
+    await f.service.dispatch({ action: 'check' }); await f.service.settled();
+    const status = await f.service.status();
+    assert.equal(status.release.app.available, expected, `current application: ${appVersion}`);
+    assert.equal(status.release.plugin.available, false);
+  }
+});
+
+test('server deployment ignores desktop markers while retaining real plugin updates', async t => {
+  const f = await fixture(t, { appVersion: '0.1.1', appVersionInFeed: '0.1.6', installation: 'server', state: { appVersion: '0.1.1' } });
+  await f.service.dispatch({ action: 'check' }); await f.service.settled();
+  const status = await f.service.status();
+  assert.equal(status.current.app, undefined);
+  assert.equal(status.release.app.available, false);
+  assert.equal(status.release.plugin.available, true);
+  assert.equal(status.canInstall, true);
+});
+
+test('loading the prepared plugin after a restart clears the staged update', async t => {
+  const f = await fixture(t, { currentVersion: '0.1.3', state: { version: '0.1.3' } });
+  await f.service.dispatch({ action: 'check' }); await f.service.settled();
+  const status = await f.service.status();
+  assert.equal(status.restartRequired, false);
+  assert.equal(status.phase, 'idle');
+  assert.equal(status.release.plugin.available, false);
+  assert.equal(status.canInstall, false);
 });
 
 test('desktop application version uses only the installed DSH-Plus application metadata', async () => {

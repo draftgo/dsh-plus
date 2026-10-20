@@ -1,6 +1,6 @@
 import { Commander } from './runtime.mjs';
 import { askNativeQuestion } from './questions.mjs';
-import { mountWeb } from './web.mjs';
+import { mountWeb, mountUnavailableWeb } from './web.mjs';
 import { mountHarnessCommands } from './harness-commands.mjs';
 import { mountHarnessAdapter } from './harness-adapter.mjs';
 import { apply as applyVoice } from '../voice/src/plugin.mjs';
@@ -17,7 +17,13 @@ const string = description => ({ type: 'string', description });
 const output = { schema: { type: 'object', additionalProperties: true }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] };
 
 export async function apply(ctx, config = {}) {
-  const commander = await new Commander(config).open();
+  let commander;
+  try { commander = await new Commander(config).open(); }
+  catch (error) {
+    ctx.logger?.error?.(`DSH-Plus startup failed: ${error.message}`);
+    ctx.inject(['connection'], child => mountUnavailableWeb(child, error));
+    return;
+  }
   ctx.effect(() => () => commander.close());
   ctx.provide('commander', commander);
   ctx.inject(['connection', 'settings', 'credentials', 'llm'], async child => {

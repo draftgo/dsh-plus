@@ -11,7 +11,7 @@ const { createRoot } = createRequire(new URL('../../../deepseek-harness/packages
 const { JSDOM } = createRequire(new URL('../../../deepseek-harness/package.json', import.meta.url))('jsdom');
 const compiled = transformSync(readFileSync(new URL('../client/updates.jsx', import.meta.url), 'utf8'), { loader: 'jsx', format: 'cjs' }).code;
 const initial = () => ({ config: { source: 'mirror', mirrorUrl: 'https://mirror.example/' }, current: { plugin: '0.1.1', app: '0.1.1' }, release: null, phase: 'idle', canInstall: false, canRollback: false, managed: true, restartRequired: false, busy: false });
-const update = () => ({ ...initial(), release: { version: '0.1.2', plugin: { version: '0.1.2', compatible: true } }, canInstall: true });
+const update = () => ({ ...initial(), release: { version: '0.1.2', plugin: { version: '0.1.2', available: true, compatible: true } }, canInstall: true });
 
 async function mount(respond = () => initial(), props = {}, timers = {}) {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: 'https://desktop.example/link/' }), previous = new Map(), calls = [];
@@ -67,8 +67,65 @@ test('plugin install gives truthful staged restart feedback without claiming aut
   } finally { await view.dispose(); }
 });
 
+test('a current server plugin with an unknown application version has no update badge', async () => {
+  const state = { ...initial(), installation: 'server', managed: false, current: { plugin: '0.1.8', engine: '0.2.1-alpha.3' },
+    release: { plugin: { version: '0.1.8', available: false }, app: { version: '0.1.6', available: true } } };
+  const view = await mount(() => state);
+  try {
+    assert(view.button('更新'));
+    assert.equal(view.document.querySelector('.cmd-update-icon i'), null);
+    await view.click('更新');
+    assert.match(view.document.querySelector('[role="dialog"]').textContent, /插件已是最新版本/);
+    assert.equal(view.button('更新插件'), undefined);
+    assert.equal(view.document.querySelector('.cmd-update-app-version'), null);
+  } finally { await view.dispose(); }
+});
+
+test('a verified application update is identified as application-only and remains visible from mobile', async () => {
+  const state = { ...initial(), release: { plugin: { version: '0.1.1', available: false }, app: { version: '0.1.2', available: true } } };
+  const view = await mount(() => state);
+  try {
+    assert(view.button('更新，应用有更新'));
+    assert(view.document.querySelector('.cmd-update-icon i'));
+    await view.click('更新，应用有更新');
+    assert.match(view.document.querySelector('[role="dialog"]').textContent, /插件已是最新版本/);
+    assert.match(view.document.querySelector('.cmd-update-app-version').textContent, /请在主机上更新/);
+    assert.equal(view.button('更新插件'), undefined);
+  } finally { await view.dispose(); }
+});
+
+test('unknown desktop version retains manual application checks without an update badge', async () => {
+  const state = { ...initial(), current: { plugin: '0.1.8' }, release: { plugin: { version: '0.1.8', available: false }, app: { version: '0.1.6', available: true } } };
+  const view = await mount(() => state, {}, { dshDesktop: { updates: { open() {} } } });
+  try {
+    assert(view.button('更新'));
+    assert.equal(view.document.querySelector('.cmd-update-icon i'), null);
+    await view.click('更新');
+    assert.match(view.document.querySelector('.cmd-update-app').textContent, /应用版本暂无法识别/);
+    assert(view.button('检查应用更新'));
+  } finally { await view.dispose(); }
+});
+
+test('missing release, unknown plugin and failed checks never claim the plugin is current', async () => {
+  for (const [state, message] of [
+    [initial(), /尚未检查插件更新/],
+    [{ ...initial(), current: {}, release: { plugin: { version: '0.1.2', available: true } } }, /暂无法识别插件版本/],
+    [{ ...initial(), phase: 'error', error: '网络故障', release: { plugin: { version: '0.1.1', available: false } } }, /暂时无法检查更新/],
+  ]) {
+    const view = await mount(() => state);
+    try {
+      assert(view.button('更新'));
+      await view.click('更新');
+      const dialog = view.document.querySelector('[role="dialog"]');
+      assert.match(dialog.textContent, message);
+      assert.doesNotMatch(dialog.textContent, /插件已是最新版本/);
+      assert.equal(view.document.querySelector('.cmd-update-icon i'), null);
+    } finally { await view.dispose(); }
+  }
+});
+
 test('busy host disables installing; incompatible and unmanaged hosts explain required application update', async () => {
-  for (const [patch, message] of [[{ busy: true }, /有任务正在运行/], [{ managed: false }, /当前安装方式不支持独立更新/], [{ release: { plugin: { version: '0.1.2', compatible: false, reason: '需要引擎 2.0' } } }, /需要引擎 2.0/]]) {
+  for (const [patch, message] of [[{ busy: true }, /有任务正在运行/], [{ managed: false }, /当前安装方式不支持独立更新/], [{ release: { plugin: { version: '0.1.2', available: true, compatible: false, reason: '需要引擎 2.0' } } }, /需要引擎 2.0/]]) {
     const view = await mount(() => ({ ...update(), ...patch }));
     try { await view.click('更新，有更新'); assert(view.button('更新插件').disabled); await view.click('更新插件'); assert(!view.calls.some(call => call.action === 'install')); assert.match(view.document.querySelector('[role="dialog"]').textContent, message); }
     finally { await view.dispose(); }
@@ -103,7 +160,7 @@ test('source selection persists on host and rechecks; invalid custom mirrors nev
 test('backend errors can retry and application links accept HTTPS only', async () => {
   let failed = true;
   const desktop = { dshDesktop: { updates: { open() {} } } };
-  const view = await mount(() => failed ? { httpError: 403, error: '仅主机可执行更新' } : { ...initial(), release: { app: { version: '0.1.2', url: 'https://github.com/example/repo/releases/latest' } } }, {}, desktop);
+  const view = await mount(() => failed ? { httpError: 403, error: '仅主机可执行更新' } : { ...initial(), release: { app: { version: '0.1.2', available: true, url: 'https://github.com/example/repo/releases/latest' } } }, {}, desktop);
   try {
     await view.click('更新');
     assert.match(view.document.querySelector('[role="alert"]').textContent, /仅主机可执行更新/);
@@ -112,8 +169,8 @@ test('backend errors can retry and application links accept HTTPS only', async (
     assert.equal(view.document.querySelector('a').href, 'https://github.com/example/repo/releases/latest');
     assert.equal(view.document.querySelector('a').rel, 'noopener noreferrer');
   } finally { await view.dispose(); }
-  const unsafe = await mount(() => ({ ...initial(), release: { app: { version: '0.1.2', url: 'javascript:alert(1)' } } }), {}, desktop);
-  try { await unsafe.click('更新，有更新'); assert.equal(unsafe.document.querySelector('a'), null); }
+  const unsafe = await mount(() => ({ ...initial(), release: { app: { version: '0.1.2', available: true, url: 'javascript:alert(1)' } } }), {}, desktop);
+  try { await unsafe.click('更新，应用有更新'); assert.equal(unsafe.document.querySelector('a'), null); }
   finally { await unsafe.dispose(); }
 });
 
@@ -151,8 +208,8 @@ test('desktop app update opens the public bridge without a feed entry, prevents 
     assert.equal(view.document.querySelector('[role="alert"]'), null);
     assert(view.button('检查应用更新'));
   } finally { await view.dispose(); }
-  const mobile = await mount(() => ({ ...initial(), release: { app: { version: '0.1.2', url: 'https://github.com/example/repo/releases/latest' } } }));
-  try { await mobile.click('更新，有更新'); assert.equal(mobile.button('检查应用更新'), undefined); assert.equal(mobile.document.querySelector('a'), null); assert.match(mobile.document.querySelector('.cmd-update-app-version').textContent, /应用 v0.1.1/); }
+  const mobile = await mount(() => ({ ...initial(), release: { app: { version: '0.1.2', available: true, url: 'https://github.com/example/repo/releases/latest' } } }));
+  try { await mobile.click('更新，应用有更新'); assert.equal(mobile.button('检查应用更新'), undefined); assert.equal(mobile.document.querySelector('a'), null); assert.match(mobile.document.querySelector('.cmd-update-app-version').textContent, /应用 v0.1.1/); }
   finally { await mobile.dispose(); }
   const older = await mount(() => ({ ...initial(), release: { app: { version: '0.1.0', available: false } } }), {}, { dshDesktop: { updates } });
   try { assert(older.button('更新')); await older.click('更新'); assert.doesNotMatch(older.document.querySelector('.cmd-update-app').textContent, /有新版本/); assert(older.button('检查应用更新')); }

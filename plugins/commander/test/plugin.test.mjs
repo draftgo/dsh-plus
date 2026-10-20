@@ -1,11 +1,58 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Context } from '@deepseek-ai/cordis';
 import { ToolRuntime } from '@deepseek-ai/dsh-tools';
 import * as plugin from '../src/plugin.mjs';
+import { Commander } from '../src/runtime.mjs';
+import { readJsonResponse } from '../client/http-response.mjs';
+
+test('a live owner blocks writes but keeps startup failure diagnosable on the sidebar API', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'commander-startup-'));
+  const owner = await new Commander({ dataDir: directory }).open();
+  const record = await readFile(join(directory, 'owner.lock'), 'utf8');
+  const ctx = new Context(), routes = new Map(), tools = new Map();
+  ctx.provide('tools', { register(value) { tools.set(value.name, value); } });
+  ctx.provide('connection', { fetch: { register(route) {
+    assert.equal(routes.has(route.path), false); routes.set(route.path, route);
+    return async () => { routes.delete(route.path); };
+  } } });
+  t.after(async () => { await ctx.fiber.dispose(); await owner.close(); await rm(directory, { recursive: true, force: true }); });
+  const fiber = ctx.plugin(plugin, { dataDir: directory }); await fiber;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ctx.commander, undefined);
+  assert.equal(tools.size, 0);
+  assert.equal(await readFile(join(directory, 'owner.lock'), 'utf8'), record);
+  const response = await routes.get('/api/commander').fetch(new Request('http://localhost/api/commander', { method: 'POST' }));
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  const body = await response.clone().json();
+  assert.equal(body.code, 'COMMANDER_UNAVAILABLE');
+  assert.match(body.error, /already in use/);
+  await assert.rejects(readJsonResponse(response, 'http://localhost/api/commander'), /already in use.*HTTP 503/);
+  await fiber.dispose();
+  assert.equal(routes.size, 0);
+});
+
+test('invalid saved state stays intact and exposes its cause without publishing tools', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'commander-invalid-startup-'));
+  const data = '{corrupt sessions';
+  await writeFile(join(directory, 'sessions.json'), data);
+  const ctx = new Context(), routes = new Map();
+  ctx.provide('tools', { register() { assert.fail('must not register tools with an unavailable store'); } });
+  // Also cover Connection becoming available after Store initialization fails.
+  await ctx.plugin(plugin, { dataDir: directory });
+  t.after(async () => { await ctx.fiber.dispose(); await rm(directory, { recursive: true, force: true }); });
+  ctx.provide('connection', { fetch: { register(route) { routes.set(route.path, route); return async () => routes.delete(route.path); } } });
+  await new Promise(resolve => setImmediate(resolve));
+  const response = await routes.get('/api/commander').fetch(new Request('http://localhost/api/commander', { method: 'POST' }));
+  assert.equal(response.status, 503);
+  assert.match((await response.json()).error, /DSH-Plus 启动失败/);
+  assert.equal(await readFile(join(directory, 'sessions.json'), 'utf8'), data);
+  await assert.rejects(readFile(join(directory, 'owner.lock')), { code: 'ENOENT' });
+});
 
 test('actual Cordis loads/unloads the service and tools; conversations cannot access each other or self-approve', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'commander-plugin-'));

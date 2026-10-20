@@ -40,6 +40,25 @@ test('published plugin payload excludes development/private files and contains i
 });
 
 const officialRoot = resolve(import.meta.dirname, '../../deepseek-harness');
+test('SSH optional build-machine addons never enter desktop plugin releases', t => {
+  const { root, put } = fixture(t);
+  put('plugin/package.json', { name: 'dsh-plus', version: '0.1.0', files: ['src', 'lib', 'voice', 'cordis.patch.yml'], dsh: { bundle: { patch: './cordis.patch.yml' } }, dependencies: { ssh2: '1.17.0' } });
+  for (const name of ['src/plugin.mjs', 'lib/client.js', 'lib/link.mjs', 'lib/link-web/index.html', 'voice/src/plugin.mjs', 'cordis.patch.yml']) put('plugin/' + name, 'fixture');
+  put('plugin/node_modules/ssh2/package.json', { name: 'ssh2', version: '1.17.0', optionalDependencies: { 'cpu-features': '0.0.10' } });
+  put('plugin/node_modules/ssh2/lib/index.js', 'module.exports = {};');
+  put('plugin/node_modules/ssh2/lib/protocol/crypto.js', 'module.exports = {};');
+  put('plugin/node_modules/ssh2/lib/protocol/crypto/build/Release/sshcrypto.node', 'wrong-node-abi');
+  put('plugin/node_modules/ssh2/lib/protocol/crypto/build/Release/obj.target/sshcrypto.node', 'wrong-node-abi');
+  put('plugin/node_modules/cpu-features/package.json', { name: 'cpu-features', version: '0.0.10' });
+  put('plugin/node_modules/cpu-features/build/Release/cpufeatures.node', 'wrong-node-abi');
+  const staged = stagePluginBundle({ plugin: join(root, 'plugin'), output: join(root, 'seed') });
+  const ssh = join(staged.destination, 'node_modules/ssh2');
+  assert.ok(existsSync(join(ssh, 'lib/protocol/crypto.js')));
+  assert.equal(existsSync(join(ssh, 'lib/protocol/crypto/build')), false);
+  assert.equal(existsSync(join(ssh, 'node_modules/cpu-features')), false);
+  assert.deepEqual(staged.omittedOptionalDependencies, ['cpu-features']);
+});
+
 const officialBoot = join(officialRoot, 'packages/boot/app-boot/lib/index.js');
 test('official profile loader resolves the preinstalled Plus bundle and respects later user disable', { skip: !existsSync(officialBoot) }, async t => {
   const { root, put } = fixture(t);

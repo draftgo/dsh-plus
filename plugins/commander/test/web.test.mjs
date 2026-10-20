@@ -19,7 +19,7 @@ async function setup(t, dependencies) {
   const provider = { config: {}, constructor: { capabilities: {} }, async connect(s,h) { return { nativeId: s.id, async submit(text) { h.event('turn.started'); h.event('text.delta',{text:`Result: ${text}`}); h.event('turn.completed',{status:'completed'}); }, async close() {} }; } };
   c.providers.set('codex',provider); c.providers.set('pi',provider);
   t.after(async () => { await c.close(); for (const dispose of effects.reverse()) await dispose?.(); await rm(dir,{recursive:true,force:true}); });
-  return { c, api, dir, route: routes.get('/api/commander'), ctx, warnings };
+  return { c, api, dir, route: routes.get('/api/commander'), routes, ctx, warnings };
 }
 
 test('loopback listen failure preserves sidebar API and native sessions, with delegation failure observable', async t => {
@@ -65,11 +65,15 @@ test('font initialization failure does not remove sidebar routes or delegation',
 });
 
 test('corrupt persisted dismissals are retained and reported instead of reset', async t => {
-  const { c, ctx, dir } = await setup(t);
+  const { c, ctx, dir, routes } = await setup(t);
   const path = join(dir, 'dismissed-harness.json');
   const corrupt = '{broken json';
   await writeFile(path, corrupt);
-  await assert.rejects(mountWeb(ctx, c), SyntaxError);
+  const api = await mountWeb(ctx, c);
+  await assert.rejects(async () => api({ action: 'state' }), SyntaxError);
+  const response = await routes.get('/api/commander').fetch(new Request('http://localhost/api/commander', { method: 'POST', body: '{"action":"state"}' }));
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).code, 'COMMANDER_UNAVAILABLE');
   assert.equal(await readFile(path, 'utf8'), corrupt);
 });
 

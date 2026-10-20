@@ -34,7 +34,9 @@ export async function createUpdates({ directory, profile, runtime, version, engi
     const state = await installed(), busy = !!(await isBusy());
     const restartRequired = !!state.managed && state.version !== version;
     const compatible = !!release && !!engineVersion && isEngineCompatible(engineVersion, release.engine);
-    const currentApp = appVersion ?? state.appVersion;
+    // A source-deployed host has no desktop application to compare. Unknown is
+    // not an older version, including desktop profiles without app metadata.
+    const currentApp = installation === 'desktop' ? appVersion ?? state.appVersion : undefined;
     return {
       // A check can publish its release before the task's finalizer releases admission.
       // Keep that intermediate response active so clients continue polling readiness.
@@ -42,8 +44,8 @@ export async function createUpdates({ directory, profile, runtime, version, engi
       managed: !!state.managed, busy, restartRequired, checkedAt, error,
       canInstall: !!state.managed && !busy && !restartRequired && !task && compatible && isNewerVersion(release.plugin.version, version),
       canRollback: !!state.managed && !!state.previous && !restartRequired && !task,
-      release: release ? { ...release, plugin: { ...release.plugin, available: isNewerVersion(release.plugin.version, version), compatible, reason: compatible ? undefined : '请先升级应用，以匹配此插件需要的引擎。' },
-        ...(release.app ? { app: { ...release.app, available: !currentApp || isNewerVersion(release.app.version, currentApp), url: resolveUpdateUrl(release.app.url, config) } } : {}) } : null,
+      release: release ? { ...release, plugin: { ...release.plugin, available: !restartRequired && isNewerVersion(release.plugin.version, version), compatible, reason: compatible ? undefined : '请先升级应用，以匹配此插件需要的引擎。' },
+        ...(release.app ? { app: { ...release.app, available: !!currentApp && isNewerVersion(release.app.version, currentApp), url: resolveUpdateUrl(release.app.url, config) } } : {}) } : null,
     };
   };
   const start = (action, work) => {

@@ -14,8 +14,37 @@ const text = (value, name, max = 20000) => {
   return value;
 };
 
+const unavailableResponse = error => Response.json({
+  error: `DSH-Plus 启动失败：${error.message}`,
+  code: 'COMMANDER_UNAVAILABLE',
+}, { status: 503, headers: { 'cache-control': 'no-store' } });
+
+/** Keep startup failures visible on the same owner-authenticated API. */
+export function mountUnavailableWeb(ctx, error) {
+  ctx.effect(() => ctx.connection.fetch.register({
+    path: '/api/commander', methods: ['POST'], requestBody: 'buffered',
+    fetch: async () => unavailableResponse(error),
+  }));
+}
+
 /** Mount direct-engine controls on the existing authenticated owner-only Connection carrier. */
 export async function mountWeb(ctx, commander, config = {}, dependencies = {}) {
+  let dispatch, failure;
+  ctx.effect(() => ctx.connection.fetch.register({
+    path: '/api/commander', methods: ['POST'], requestBody: 'buffered',
+    async fetch(request) {
+      if (failure) return unavailableResponse(failure);
+      if (!dispatch) return unavailableResponse(new Error('正在初始化，请稍后重试'));
+      try { return Response.json(await dispatch(await request.json()), { headers: { 'cache-control': 'no-store' } }); }
+      catch (error) { return Response.json({ error: error.message, ...(error.session ? { session: error.session } : {}) }, { status: 400, headers: { 'cache-control': 'no-store' } }); }
+    },
+  }));
+  try { dispatch = await initializeWeb(ctx, commander, config, dependencies); }
+  catch (error) { failure = error; ctx.logger?.error?.(`DSH-Plus sidebar startup failed: ${error.message}`); }
+  return input => { if (failure) throw failure; return dispatch(input); };
+}
+
+async function initializeWeb(ctx, commander, config, dependencies) {
   const maxDepth = config.maxDelegationDepth ?? 3;
   const maxChildren = config.maxDelegationChildren ?? 12;
   if (!Number.isSafeInteger(maxDepth) || maxDepth < 1 || maxDepth > 8) throw new Error('maxDelegationDepth must be an integer from 1 to 8');
@@ -224,13 +253,6 @@ export async function mountWeb(ctx, commander, config = {}, dependencies = {}) {
     if (action === 'approve') { commander.approve(s.id, text(input.approvalId, 'approvalId', 200), input.answer); return commander.snapshot(s.id); }
     throw new Error(`Unknown DSH-Plus action: ${action}`);
   };
-  ctx.effect(() => ctx.connection.fetch.register({
-    path: '/api/commander', methods: ['POST'], requestBody: 'buffered',
-    async fetch(request) {
-      try { return Response.json(await dispatch(await request.json()), { headers: { 'cache-control': 'no-store' } }); }
-      catch (error) { return Response.json({ error: error.message, ...(error.session ? { session: error.session } : {}) }, { status: 400, headers: { 'cache-control': 'no-store' } }); }
-    },
-  }));
   // Optional localhost MCP and fonts must not remove the sidebar's core API.
   try {
     const bridge = await (dependencies.openDelegationBridge ?? (c => new DelegationBridge(c).open()))(commander);

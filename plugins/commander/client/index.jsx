@@ -8,7 +8,7 @@ import { UsageLauncher, UsageDialog, mountUsageStyle } from './usage.jsx';
 import { ThemeLauncher, createThemeSource } from './theme-launcher.jsx';
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import icons from './icons.json';
-import { FishLogo, Tooltip, Modal, Menu, IconPinOutlineRegular, IconPinFillRegular, IconBranchOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives';
+import { FishLogo, Tooltip, Modal, Menu, LinkIconMedium, IconPinOutlineRegular, IconPinFillRegular, IconBranchOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives';
 import css from './style.css';
 import fontCss from './fonts.css';
 import { UIIcon } from './iconsax.jsx';
@@ -60,7 +60,7 @@ function SessionIcon({ provider, status }) {
 }
 function SettingsLauncher({ host, wide, settingsOpen, openSettings, settingsShortcut, theme }) {
   const d = useData();
-  return <div className={`cmd-settings-row ${wide ? '' : 'cmd-settings-row-rail'}`}><Tooltip label="设置" side="right" delayMs={450} portal><button type="button" className="cmd-settings" aria-label="设置" aria-haspopup="dialog" aria-expanded={settingsOpen} aria-keyshortcuts={settingsShortcut?.aria} onClick={() => openSettings()}><UIIcon name="settings" size={16} selected={settingsOpen} /></button></Tooltip><ThemeLauncher theme={theme} /><UpdateLauncher host={host} wide={false} /><UsageLauncher /><UsageDialog /><Hint label={d.showArchived ? '返回最近对话' : '已归档对话'}><button type="button" className="cmd-archive-launcher" aria-label="查看归档" aria-pressed={!!d.showArchived} disabled={!!d.archiveTransitioning} onClick={() => document.dispatchEvent(new Event('commander:toggle-archive'))}><UIIcon name="archive" size={16} selected={!!d.showArchived} /></button></Hint></div>;
+  return <div className={`cmd-settings-row ${wide ? '' : 'cmd-settings-row-rail'}`}><Tooltip label="设置" side="right" delayMs={450} portal><button type="button" className="cmd-settings" aria-label="设置" aria-haspopup="dialog" aria-expanded={settingsOpen} aria-keyshortcuts={settingsShortcut?.aria} onClick={() => openSettings()}><UIIcon name="settings" size={16} selected={settingsOpen} /></button></Tooltip><ThemeLauncher theme={theme} /><UpdateLauncher host={host} wide={false} /><UsageLauncher /><UsageDialog /><Hint label={d.showArchived ? '返回最近对话' : '已归档对话'}><button type="button" className="cmd-archive-launcher" aria-label="查看归档" aria-pressed={!!d.showArchived} disabled={!!d.archiveTransitioning} onClick={() => document.dispatchEvent(new Event('commander:toggle-archive'))}><UIIcon name="archive" size={16} selected={!!d.showArchived} /></button></Hint><Tooltip label="GitHub" delayMs={450} portal><button type="button" className="cmd-archive-launcher" aria-label="在浏览器中打开 GitHub 项目" onClick={() => window.open('https://github.com/draftgo/dsh-plus', '_blank', 'noopener,noreferrer')}><LinkIconMedium kind="url" href="https://github.com/draftgo/dsh-plus" size={16} /></button></Tooltip></div>;
 }
 function Hint({ label, children }) { return <Tooltip label={label} delayMs={450} portal>{children}</Tooltip>; }
 function ErrorLine({ message }) { return message ? <div className="cmd-error" role="alert">{message}</div> : null; }
