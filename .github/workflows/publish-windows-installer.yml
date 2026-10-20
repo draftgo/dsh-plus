@@ -8,7 +8,7 @@ on:
       release_tag:
         description: Application release tag (must match the installer version)
         required: true
-        default: v0.1.7
+        default: v0.1.8
 permissions:
   actions: read
   contents: write
@@ -72,7 +72,7 @@ jobs:
           assert metadata['schemaVersion'] == 1 and metadata['sourceSha'] == os.environ['SOURCE_SHA']
           assert metadata['version'] == version == json.loads(Path('package.json').read_text())['version']
           assert metadata['artifact'] == f'xiaojiao-{version}-win-x64-setup.exe'
-          assert set(metadata['verified']) == {'packaged-runtime', 'fresh-install', 'legacy-upgrade'}
+          assert set(metadata['verified']) == {'packaged-runtime', 'fresh-install', 'legacy-plugin-shadow-repair', 'actual-plugin-resolution', 'legacy-upgrade'}
           names = {item['name'] for item in metadata['files']}
           assert metadata['artifact'] in names
           assert names == {path.name for path in directory.iterdir() if path.name != 'build-source.json'}

@@ -1,7 +1,7 @@
 {
   "name": "dsh-plus",
   "displayName": "DSH-Plus",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "type": "module",
   "description": "DSH-Plus native coding agents, shared projects, voice and enhanced Harness UI",
