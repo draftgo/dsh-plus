@@ -67,6 +67,7 @@ test('official profile loader resolves the preinstalled Plus bundle and respects
   for (const [name, source] of [
     ['dsh-app-boot', 'packages/boot/app-boot'], ['dsh-home-paths', 'packages/util/home-paths'],
     ['dsh', 'apps/cli'],
+    ['dsh-base', 'packages/bundle/base'], ['dsh-web-app', 'packages/bundle/web-app'],
   ]) symlinkSync(join(officialRoot, source), join(modules, '@deepseek-ai', name), 'junction');
   seedFixture(put, 'resources/dsh-plus/seed');
   const profile = join(root, 'home/profiles/desktop');
@@ -76,7 +77,7 @@ test('official profile loader resolves the preinstalled Plus bundle and respects
   assert.equal((await initializePluginProfile(options)).enrolled, true);
   const boot = await import(pathToFileURL(officialBoot).href);
   const loaded = boot.loadProfileDirectory('dsh', profile, join(modules, '@deepseek-ai/dsh/package.json'));
-  assert.equal(loaded.skippedBundles.length, 0);
+  assert.deepEqual(loaded.skippedBundles, [], JSON.stringify(loaded.skippedBundles));
   const state = await getInstallState(profile);
   const plus = loaded.layers.find(layer => layer.packageName === state.bundleName);
   assert.ok(plus, 'official loader selected the profile-local Plus bundle');
@@ -199,8 +200,8 @@ for (const scenario of [
     assert.equal(actual.manifestVersion, scenario.expected, 'profile-relative manifest resolution uses the selected release');
     assert.equal(actual.loadedVersion, scenario.expected, 'actual ESM plugin loading uses the selected release');
     assert.equal(actual.clientVersion, scenario.expected, 'client subpath uses the selected release');
-    assert.equal(realpathSync(actual.metadataPath), realpathSync(join(result.directory, 'node_modules/dsh-plus')));
-    assert.equal(realpathSync(actual.entryPath), realpathSync(join(result.directory, 'node_modules/dsh-plus/src/plugin.mjs')));
+    assert.equal(realpathSync.native(actual.metadataPath), realpathSync.native(join(result.directory, 'node_modules/dsh-plus')));
+    assert.equal(realpathSync.native(actual.entryPath), realpathSync.native(join(result.directory, 'node_modules/dsh-plus/src/plugin.mjs')));
   }
 });
 

@@ -142,11 +142,11 @@ try {
   const parent = pathToFileURL(join(profile, 'package.json')).href;
   const selected = ctx.pluginPackages.packageOf('dsh-plus', parent);
   assert.equal(selected?.version, expectedVersion, 'actual plugin metadata must match the installed version');
-  assert.equal(realpathSync(selected.dir), realpathSync(join(expectedDirectory, 'node_modules/dsh-plus')));
+  assert.equal(realpathSync.native(selected.dir), realpathSync.native(join(expectedDirectory, 'node_modules/dsh-plus')));
   const require = createRequire(parent);
   assert.equal(JSON.parse(readFileSync(require.resolve('dsh-plus/package.json'), 'utf8')).version, expectedVersion);
-  assert.equal(realpathSync(require.resolve('dsh-plus')), realpathSync(join(selected.dir, 'src/plugin.mjs')));
-  assert.equal(realpathSync(require.resolve('dsh-plus/client')), realpathSync(join(selected.dir, 'lib/client.js')));
+  assert.equal(realpathSync.native(require.resolve('dsh-plus')), realpathSync.native(join(selected.dir, 'src/plugin.mjs')));
+  assert.equal(realpathSync.native(require.resolve('dsh-plus/client')), realpathSync.native(join(selected.dir, 'lib/client.js')));
   console.log(`Actual profile plugin resolution passed: ${expectedVersion}`);
 } finally { await ctx.fiber.dispose(); }
 '@
