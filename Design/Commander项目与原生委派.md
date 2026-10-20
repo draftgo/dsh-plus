@@ -67,3 +67,8 @@
 MCP 不增加恢复/删锁工具；仅 /api/commander 新增启动不可用的 503 响应。
 
 本轮验证：Commander 375/375、桌面相关 20/20、build:plus 与根 check 通过。隔离真实官方 Harness 在默认用户数据路径完成 SIGKILL → 旧格式锁恢复 → 认证 state/ensureRecent 200，会话及原生句柄保留；损坏侧栏/会话文件分别返回明确 JSON 503，原数据不被重置。Windows packaged smoke 已补路径但原生执行尚未进行；完整记录见 plugins/commander/VERIFICATION.md。
+
+
+### 启动就绪竞态（2026-10-20）
+
+Windows 原生强杀复启验收发现：官方 Web ready 早于 Commander 侧栏初始化完成，首次 state/ensureRecent 请求错误返回“正在初始化”的 503。侧栏认证路由仍须提前注册，但请求必须等待同一初始化 Promise；成功后再执行动作，真实初始化失败保持 JSON 503 / COMMANDER_UNAVAILABLE 与原始错误，不通过重试测试掩盖。并发首请求共用初始化，不重复执行初始化或调用，正常前端无须暴露瞬时初始化错误。需覆盖受控延迟、并发首请求、真实失败与 Windows 原生强杀复启。无 MCP/OpenAPI 结构变更。

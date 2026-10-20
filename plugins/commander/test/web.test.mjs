@@ -22,6 +22,40 @@ async function setup(t, dependencies) {
   return { c, api, dir, route: routes.get('/api/commander'), routes, ctx, warnings };
 }
 
+for (const fail of [false, true]) {
+  test('early concurrent sidebar requests wait for initialization ' + (fail ? 'failure' : 'success'), async t => {
+    const { c, ctx, dir, routes } = await setup(t);
+    ctx.baseUrl = pathToFileURL(dir + '/').href;
+    if (fail) await writeFile(join(dir, 'dismissed-harness.json'), '{broken json');
+    let initializations = 0;
+    let release;
+    const delayed = new Promise(resolve => { release = resolve; });
+    const mounting = mountWeb(ctx, c, {}, {
+      mountFonts: async () => { initializations++; await delayed; },
+    });
+    let responses = 0;
+    const requests = ['state', 'ensureRecent'].map(action => routes.get('/api/commander').fetch(new Request('http://localhost/api/commander', {
+      method: 'POST', body: JSON.stringify({ action }),
+    })).then(response => { responses++; return response; }));
+    assert.equal(responses, 0);
+    await new Promise(resolve => setTimeout(resolve, 25));
+    if (!fail) assert.equal(responses, 0);
+    release();
+    await mounting;
+    const results = await Promise.all(requests);
+    assert.equal(initializations, fail ? 0 : 1);
+    for (const response of results) {
+      assert.equal(response.status, fail ? 503 : 200);
+      const body = await response.json();
+      if (fail) {
+        assert.equal(body.code, 'COMMANDER_UNAVAILABLE');
+        assert.match(body.error, /DSH-Plus 启动失败/);
+        assert.doesNotMatch(body.error, /正在初始化/);
+      } else assert.ok(body.projects || body.workspaceId);
+    }
+  });
+}
+
 test('loopback listen failure preserves sidebar API and native sessions, with delegation failure observable', async t => {
   const failure = Object.assign(new Error('listen EACCES: permission denied 127.0.0.1'), { code: 'EACCES' });
   const server = new EventEmitter();

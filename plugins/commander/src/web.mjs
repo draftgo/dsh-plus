@@ -30,17 +30,20 @@ export function mountUnavailableWeb(ctx, error) {
 /** Mount direct-engine controls on the existing authenticated owner-only Connection carrier. */
 export async function mountWeb(ctx, commander, config = {}, dependencies = {}) {
   let dispatch, failure;
+  const initialized = Promise.resolve().then(async () => {
+    try { dispatch = await initializeWeb(ctx, commander, config, dependencies); }
+    catch (error) { failure = error; ctx.logger?.error?.(`DSH-Plus sidebar startup failed: ${error.message}`); }
+  });
   ctx.effect(() => ctx.connection.fetch.register({
     path: '/api/commander', methods: ['POST'], requestBody: 'buffered',
     async fetch(request) {
+      await initialized;
       if (failure) return unavailableResponse(failure);
-      if (!dispatch) return unavailableResponse(new Error('正在初始化，请稍后重试'));
       try { return Response.json(await dispatch(await request.json()), { headers: { 'cache-control': 'no-store' } }); }
       catch (error) { return Response.json({ error: error.message, ...(error.session ? { session: error.session } : {}) }, { status: 400, headers: { 'cache-control': 'no-store' } }); }
     },
   }));
-  try { dispatch = await initializeWeb(ctx, commander, config, dependencies); }
-  catch (error) { failure = error; ctx.logger?.error?.(`DSH-Plus sidebar startup failed: ${error.message}`); }
+  await initialized;
   return input => { if (failure) throw failure; return dispatch(input); };
 }
 
