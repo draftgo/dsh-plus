@@ -5,7 +5,7 @@ on:
       release_tag:
         description: Existing release tag to receive the APK
         required: true
-        default: v0.1.10
+        default: v0.1.11
       publish:
         description: Publish the verified signed release APK
         type: boolean
@@ -88,4 +88,7 @@ jobs:
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "小角 $version" --notes "小角正式应用，包含 DSH-Plus 插件、多设备连接与工具环境自动准备。Android 使用持久发行密钥签名。旧 debug 验收包首次迁移需卸载，后续正式版本可直接升级。" --latest=false
           fi
+          # Resolve annotated and lightweight tags to the actual build commit.
+          tag_sha=$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq .sha)
+          test "$tag_sha" = "$GITHUB_SHA"
           gh release upload "$RELEASE_TAG" "xiaojiao-$version-android.apk" "xiaojiao-$version-android.apk.sha256" --clobber

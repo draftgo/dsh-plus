@@ -79,6 +79,23 @@ test('plugin admin persists settings, advertises real TLS and separates public p
   assert.equal(link.status().enabled, false);
 });
 
+test('invalid relay configuration never disables direct Link or exposes the host secret', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'link-relay-admin-'));
+  const ctx = { get: () => undefined, workspaceRegistry: { list: () => [] }, connection: { fetch: { register: () => () => {} } }, effect: fn => fn() };
+  const token = 'private-relay-secret-'.repeat(3);
+  const link = await mountLink(ctx, { directory, env: { DSH_LINK_RELAY_URL: 'http://invalid.example', DSH_LINK_RELAY_TOKEN: token } });
+  t.after(async () => { await link.close(); await rm(directory, { recursive: true, force: true }); });
+  const state = await link.admin({ action: 'configure', enabled: true, host: '127.0.0.1', port: 0 });
+  assert.equal(state.enabled, true);
+  assert.equal(state.relay.configured, true);
+  assert.equal(state.relay.connected, false);
+  assert(!JSON.stringify(state).includes(token));
+  await assert.rejects(link.admin({ action: 'pairing', mode: 'relay' }), /尚未连接/);
+  assert((await link.admin({ action: 'pairing', mode: 'lan' })).uri.startsWith('dshlink://pair?'));
+  await link.admin({ action: 'configure', enabled: false });
+  assert.equal(link.status().relay.connected, false);
+});
+
 test('quick enable preserves settings and pairing uses suitable addresses without loopback fallback', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'link-discovery-'));
   const entry = address => ({ address, internal: false });
@@ -105,4 +122,20 @@ test('quick enable preserves settings and pairing uses suitable addresses withou
   assert.deepEqual(link.status().addresses, []);
   await assert.rejects(link.admin({ action: 'pairing' }), /未找到可用的连接地址/);
   assert.equal((await link.admin({ action: 'pairing', mode: 'public' })).url, 'https://desk.example.com');
+});
+
+test('owner relay configuration persists separately without returning credentials', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'link-relay-save-'));
+  const ctx = { get: () => undefined, workspaceRegistry: { list: () => [] }, connection: { fetch: { register: () => () => {} } }, effect: fn => fn() };
+  let link = await mountLink(ctx, { directory, env: {} });
+  t.after(async () => { await link.close(); await rm(directory, { recursive: true, force: true }); });
+  const token = 'owner-relay-credential-'.repeat(3);
+  await assert.rejects(link.admin({ action: 'relay-configure', url: 'http://relay.example', token }), /HTTPS/);
+  const value = await link.admin({ action: 'relay-configure', url: 'https://relay.example:48730', token, enabled: false });
+  assert.equal(value.enabled, false);
+  assert.equal(value.relay.configured, true);
+  assert.equal(JSON.stringify(value).includes(token), false);
+  await link.close(); link = await mountLink(ctx, { directory, env: { DSH_LINK_RELAY_URL: 'https://ignored.example' } });
+  assert.equal(link.status().relay.url, 'https://relay.example:48730');
+  assert.equal(link.status().relay.enabled, false);
 });

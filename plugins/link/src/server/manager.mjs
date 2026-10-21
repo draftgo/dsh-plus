@@ -1,11 +1,12 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { createServer, isIP } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ssh2 from 'ssh2';
 import { request } from 'node:https';
 import { remoteAgent, remoteJson } from '../devices/remote.mjs';
+import { deployRelay, relayManagementCommand, validateRelayDeployment } from './relay-deployment.mjs';
 const { Client } = ssh2;
 export const fingerprintOf = key => 'SHA256:' + createHash('sha256').update(key).digest('base64').replace(/=+$/, '');
 export const shellQuote = value => "'" + String(value).replaceAll("'", "'\\''") + "'";
@@ -66,7 +67,7 @@ export async function execute(client, command, { timeout = 60000, stdin, maximum
     });
   });
 }
-async function upload(client, local, remote) {
+export async function upload(client, local, remote) {
   const sftp = await new Promise((resolve, reject) => client.sftp((error, value) => error ? reject(error) : resolve(value)));
   try { await new Promise((resolve, reject) => sftp.fastPut(local, remote, { mode: 0o600 }, error => error ? reject(error) : resolve())); }
   finally { sftp.end(); }
@@ -102,7 +103,7 @@ export async function verifyServerWorkbench(target) {
     });
   } finally { agent.destroy(); }
 }
-export function createServerManager({ directory, onDevice = async () => {}, runtimeRoot, assetsRoot, clientFactory = () => new Client() } = {}) {
+export function createServerManager({ directory, onDevice = async () => {}, runtimeRoot, assetsRoot, relayAssetsRoot, onRelay = async () => { throw new Error('本机中继接入未配置'); }, clientFactory = () => new Client() } = {}) {
   if (!directory) throw new Error('服务器管理目录未配置');
   const clients = new Set();
   const file = join(directory, 'servers.json'), records = new Map(), sessions = new Map(), jobs = new Map(), connecting = new Set();
@@ -130,7 +131,7 @@ export function createServerManager({ directory, onDevice = async () => {}, runt
     ensure(); if (jobs.size >= 64) for (const [id, job] of jobs) { if (job.state !== 'running') jobs.delete(id); if (jobs.size < 32) break; }
     const job = { id: randomUUID(), state: 'running', steps: [{ name: '连接 SSH', state: 'running' }] }; jobs.set(job.id, job);
     const step = name => { for (const old of job.steps) if (old.state === 'running') old.state = 'done'; job.steps.push({ name, state: 'running' }); };
-    Promise.resolve().then(() => work(job, step)).then(device => { job.state = 'done'; for (const step of job.steps) if (step.state === 'running') step.state = 'done'; job.device = publicRecord(device); }).catch(error => { job.state = 'error'; job.error = friendlyError(error); for (const step of job.steps) if (step.state === 'running') step.state = 'error'; });
+    Promise.resolve().then(() => work(job, step)).then(device => { job.state = 'done'; for (const step of job.steps) if (step.state === 'running') step.state = 'done'; if (device?.relay) job.relay = device.relay; else job.device = publicRecord(device); }).catch(error => { job.state = 'error'; job.error = friendlyError(error); for (const step of job.steps) if (step.state === 'running') step.state = 'error'; });
     return { jobId: job.id };
   }
   async function attach(client, device) {
@@ -146,6 +147,30 @@ export function createServerManager({ directory, onDevice = async () => {}, runt
     return device;
   }
   return {
+    async relayProbe(input) { return this.probe(input); },
+    async deployRelay(input) {
+      ensure(); validateSshInput(input, { credentials: true }); validateRelayDeployment(input);
+      const key = 'relay|' + [input.host, input.port ?? 22, input.username].join('|');
+      if (connecting.has(key)) throw new Error('此中继正在部署'); connecting.add(key);
+      return startJob(async (_job, step) => { let client; try {
+        client = await open(input);
+        let relayAssets = relayAssetsRoot;
+        if (!relayAssets) {
+          const candidates = [fileURLToPath(new URL('../relay/', import.meta.url)), fileURLToPath(new URL('../../../commander/lib/relay/', import.meta.url)), join(assets, '..', 'relay')];
+          for (const candidate of candidates) { try { await access(join(candidate, 'run-relay-server.mjs')); await access(join(candidate, 'ip-certificate.mjs')); relayAssets = candidate; break; } catch {} }
+        }
+        if (!relayAssets) throw new Error('未找到打包的中继部署工具');
+        return await deployRelay({ client, input, execute, upload, assets: relayAssets, step, onRelay });
+      } catch(error) { throw new Error(redactServerLog(error.message, [input.password,input.privateKey,input.passphrase])); } finally { client?.end(); connecting.delete(key); } });
+    },
+    async manageRelay(input) {
+      ensure(); validateSshInput(input, { credentials: true }); const command = relayManagementCommand(input.operation);
+      const client = await open(input);
+      try { const result = await execute(client, 'if [ "$(id -u)" = 0 ]; then bash -s; else sudo -n bash -s; fi', { stdin: command });
+        if(result.code !== 0 && input.operation !== 'status') throw new Error('中继管理失败：' + redactServerLog(result.stderr, [input.password,input.privateKey,input.passphrase]));
+        return { operation: input.operation, ...(input.operation === 'status' ? { status: result.code === 0 ? result.stdout.trim() : 'inactive' } : {}), ...(input.operation === 'logs' ? { logs: redactServerLog(result.stdout) } : {}) };
+      } finally { client.end(); }
+    },
     async probe(input) { ensure(); validateSshInput(input); return open(input, true); },
     async connect(input) {
       ensure(); await ready; const target = validateSshInput(input, { credentials: true });

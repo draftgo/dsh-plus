@@ -44,7 +44,7 @@ export function stagePluginBundle({ runtime, output, plugin = resolve(import.met
   const packed = spawnSync(npm, ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: plugin, encoding: 'utf8', shell: process.platform === 'win32' });
   if (packed.status !== 0) throw new Error(`Plus bundle: npm pack failed: ${packed.stderr}`);
   const files = JSON.parse(packed.stdout)[0].files.map(file => file.path);
-  for (const required of ['src/plugin.mjs', 'lib/client.js', 'lib/link.mjs', 'lib/link-web/index.html', 'voice/src/plugin.mjs', 'cordis.patch.yml']) {
+  for (const required of ['src/plugin.mjs', 'lib/client.js', 'lib/link.mjs', 'lib/link-web/index.html', 'lib/relay/run-relay-server.mjs', 'lib/relay/ip-certificate.mjs', 'lib/relay/relay.example.json', 'voice/src/plugin.mjs', 'cordis.patch.yml']) {
     if (!files.includes(required) || !existsSync(join(plugin, required))) throw new Error(`Plus bundle: missing built file ${required}; run build:plus first`);
   }
   const shared = new Map();

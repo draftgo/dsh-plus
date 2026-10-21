@@ -32,4 +32,12 @@ export async function buildLink() {
     logLevel: 'warning', legalComments: 'eof',
   });
   await cp(new URL('../../link/dist/web/', import.meta.url), new URL('link-web/', output), { recursive: true });
+  // Keep the self-hosted relay tools in the shipped plugin, not only in the checkout.
+  await build({
+    entryPoints: ['run-relay-server', 'ip-certificate'].map(name => fileURLToPath(new URL(`../../link/scripts/${name}.mjs`, import.meta.url))),
+    outdir: fileURLToPath(new URL('relay/', output)), outExtension: { '.js': '.mjs' },
+    bundle: true, platform: 'node', format: 'esm', target: 'node22', external: ['ws'],
+    logLevel: 'warning', legalComments: 'eof',
+  });
+  await cp(new URL('../../link/config/relay.example.json', import.meta.url), new URL('relay/relay.example.json', output));
 }

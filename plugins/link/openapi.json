@@ -3,7 +3,7 @@
   "info": {
     "title": "DSH-Plus 设备中心",
     "version": "1.0.0",
-    "description": "本机 owner 使用 launch 一次性入口获取私有会话路径。设备 token、SSH 密码和私钥不在公开响应暴露。MCP delegation 不变，不开放 Agent 设备切换或 SSH 工具。"
+    "description": "本机 owner 使用 launch 一次性入口获取私有会话路径。设备 token、SSH 密码和私钥不在公开响应暴露。MCP delegation 不变，不开放 Agent 设备切换或 SSH 工具。 自有中继首版为单主机独占 HTTPS 源，TLS 在用户中继终止，中继运营者可读取内容；不增加 MCP 管理工具。"
   },
   "servers": [
     {
@@ -48,7 +48,7 @@
             "description": "来源未授权"
           }
         },
-        "description": "请求 Origin 必须等于设备中心源。sshProbe 不发送认证，sshConnect 必须包含用户确认的原始 SHA256 fingerprint。select 返回一次性工作台 URL。移除只删除本机连接，不卸载服务器。 Android 原生还支持 closeWorkbench 关闭本机页面；Node 由前端关闭 iframe。Android 任务终态为 completed/failed。 list.capabilities.hostAdmin 表示允许管理当前主机连接；hostStatus/hostConfigure/hostPairing/hostConfirm/hostReject/hostRevoke 为受限 owner 调用。配对 uri 接受完整 dshlink://pair 或 HTTPS /link/#code=...。SSH 任务在 TLS 指纹、设备令牌及真实 HTML 工作台验证成功后才注册设备。 hostCloudAccess 仅 owner 设备中心可用，透传 operation/key 管理当前主机云端密钥；云端浏览器直接调用同源 owner 管理接口以续签当前会话。"
+        "description": "请求 Origin 必须等于设备中心源。sshProbe 不发送认证，sshConnect 必须包含用户确认的原始 SHA256 fingerprint。select 返回一次性工作台 URL。移除只删除本机连接，不卸载服务器。 Android 原生还支持 closeWorkbench 关闭本机页面；Node 由前端关闭 iframe。Android 任务终态为 completed/failed。 list.capabilities.hostAdmin 表示允许管理当前主机连接；hostStatus/hostConfigure/hostPairing/hostConfirm/hostReject/hostRevoke 为受限 owner 调用。配对 uri 接受完整 dshlink://pair 或 HTTPS /link/#code=...。SSH 任务在 TLS 指纹、设备令牌及真实 HTML 工作台验证成功后才注册设备。 hostCloudAccess 仅 owner 设备中心可用，透传 operation/key 管理当前主机云端密钥；云端浏览器直接调用同源 owner 管理接口以续签当前会话。 relayProbe/relayDeploy/relayAction 仅支持能力 relayDeploy 的 owner 桌面设备中心；部署成功自动保存并启用主机连接，job.relay 不含密钥。hostRelayConfigure 接收 url/token/enabled，状态不回显 token。relayAction operation 为 status/logs/start/stop/restart/uninstall。 已批准配对可接收服务端可信 routes，桌面及 Android 连接前优先固定 SPKI 的直连，网络不可达回退 CA 中继；证书异常或授权失败不降级，活动请求不重放。历史单地址配对保持兼容，重新配对获取 routes。"
       }
     },
     "/api/commander-devices": {
@@ -128,37 +128,95 @@
       ],
       "post": {
         "summary": "Owner Link 管理与云端访问密钥",
-        "description": "仅官方 owner 通道。cloud-access 独立于 Link listener；返回常规状态及 cloudAccess:{configured,enabled,origin,error,ready,readinessError}，从不返回密钥/派生值。精确云 Origin 的启用/轮换响应签发 Secure HttpOnly SameSite=Strict Cookie 保持当前管理会话；本机管理员需单独登录云站。configured 仅表示独立环回鉴权服务已启动；ready 表示最近30秒内服务端经精确HTTPS源、无重定向访问登录路由并验证当前实例随机标识。状态轮询不阻塞，启用/轮换前强制验证；ready不是全站规则扫描结果。配置损坏时保留owner管理接口并拒绝云端鉴权。 云密钥仅保护 owner 入口；按配套反代部署的 /link/ 使用独立设备认证，不重复要求 owner 密钥。",
+        "description": "仅官方 owner 通道。cloud-access 独立于 Link listener；返回常规状态及 cloudAccess:{configured,enabled,origin,error,ready,readinessError}，从不返回密钥/派生值。精确云 Origin 的启用/轮换响应签发 Secure HttpOnly SameSite=Strict Cookie 保持当前管理会话；本机管理员需单独登录云站。configured 仅表示独立环回鉴权服务已启动；ready 表示最近30秒内服务端经精确HTTPS源、无重定向访问登录路由并验证当前实例随机标识。状态轮询不阻塞，启用/轮换前强制验证；ready不是全站规则扫描结果。配置损坏时保留owner管理接口并拒绝云端鉴权。 云密钥仅保护 owner 入口；按配套反代部署的 /link/ 使用独立设备认证，不重复要求 owner 密钥。 status 增加 relay:{configured,connected,lastError}，connected 仅代表主机出站通道在线，不代表访问端可达。pairing.mode 支持 relay：仅通道在线时签发中继 HTTPS 配对地址；通过 DSH_LINK_RELAY_URL/TOKEN 配置主机出站连接，密钥不在响应暴露。 relay-configure 为 owner 显式保存 url/token/enabled，优先于启动环境变量；token 仅写入 0600 配置，状态返回 relay:{configured,enabled,url,connected,lastError}，不回显 token。部署与中继管理不新增 MCP。",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "action",
-                  "operation"
-                ],
-                "properties": {
-                  "action": {
-                    "const": "cloud-access"
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "action",
+                      "operation"
+                    ],
+                    "properties": {
+                      "action": {
+                        "const": "cloud-access"
+                      },
+                      "operation": {
+                        "enum": [
+                          "enable",
+                          "rotate",
+                          "disable"
+                        ]
+                      },
+                      "key": {
+                        "type": "string",
+                        "minLength": 16,
+                        "maxLength": 512,
+                        "writeOnly": true,
+                        "description": "启用/轮换必填；仅本次请求明文传递，持久化scrypt派生值。"
+                      }
+                    },
+                    "additionalProperties": false
                   },
-                  "operation": {
-                    "enum": [
-                      "enable",
-                      "rotate",
-                      "disable"
-                    ]
-                  },
-                  "key": {
-                    "type": "string",
-                    "minLength": 16,
-                    "maxLength": 512,
-                    "writeOnly": true,
-                    "description": "启用/轮换必填；仅本次请求明文传递，持久化scrypt派生值。"
+                  {
+                    "type": "object",
+                    "required": [
+                      "action"
+                    ],
+                    "properties": {
+                      "action": {
+                        "enum": [
+                          "status",
+                          "configure",
+                          "pairing",
+                          "confirm",
+                          "reject",
+                          "revoke",
+                          "relay-configure"
+                        ]
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "token": {
+                        "type": "string",
+                        "writeOnly": true
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "host": {
+                        "type": "string"
+                      },
+                      "port": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 65535
+                      },
+                      "publicUrl": {
+                        "type": "string"
+                      },
+                      "mode": {
+                        "enum": [
+                          "lan",
+                          "public",
+                          "relay"
+                        ]
+                      },
+                      "address": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
                   }
-                },
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -331,7 +389,11 @@
               "hostConfirm",
               "hostReject",
               "hostRevoke",
-              "hostCloudAccess"
+              "hostCloudAccess",
+              "relayProbe",
+              "relayDeploy",
+              "relayAction",
+              "hostRelayConfigure"
             ]
           },
           "deviceId": {
@@ -409,7 +471,8 @@
           "mode": {
             "enum": [
               "lan",
-              "public"
+              "public",
+              "relay"
             ]
           },
           "address": {
@@ -423,6 +486,35 @@
             "writeOnly": true,
             "minLength": 16,
             "maxLength": 512
+          },
+          "publicIp": {
+            "type": "string",
+            "description": "服务器公网 IP；无需域名"
+          },
+          "email": {
+            "type": "string"
+          },
+          "relayPort": {
+            "type": "integer",
+            "minimum": 20000,
+            "maximum": 49151
+          },
+          "challengeMode": {
+            "enum": [
+              "standalone",
+              "webroot"
+            ]
+          },
+          "webroot": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "token": {
+            "type": "string",
+            "writeOnly": true
           }
         },
         "allOf": [

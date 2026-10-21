@@ -8,10 +8,11 @@ import java.security.MessageDigest
 import java.util.Base64
 
 data class Identity(val url: String, val pin: String, val code: String, val name: String, val token: String,
-    val id: String = stableId(url, pin), val kind: String = "computer", val ssh: JSONObject? = null, val warning: String = "") {
+    val id: String = stableId(url, pin), val kind: String = "computer", val ssh: JSONObject? = null, val warning: String = "", val routes: JSONArray? = null) {
     val hostKey: String get() = "$url|$pin"
     fun toJson() = JSONObject().apply {
         put("url", url); put("pin", pin); put("code", code); put("name", name); put("token", token)
+        if (routes != null) put("routes", routes)
         put("id", id); put("kind", kind); if (ssh != null) put("ssh", ssh); if (warning.isNotBlank()) put("warning", warning)
     }
     fun publicJson(status: String = "unknown") = JSONObject().apply {
@@ -30,7 +31,7 @@ data class Identity(val url: String, val pin: String, val code: String, val name
             val token = json.optString("token").trim()
             require(code.length <= 256 && token.length <= 4096) { "设备凭据无效" }
             require(code.isNotEmpty() || token.isNotEmpty()) { "缺少配对码或设备令牌" }
-            return Identity(url, pin, code, json.optString("name").take(128), token, json.optString("id").ifBlank { stableId(url, pin) }, json.optString("kind", "computer"), json.optJSONObject("ssh"), json.optString("warning"))
+            return Identity(url, pin, code, json.optString("name").take(128), token, json.optString("id").ifBlank { stableId(url, pin) }, json.optString("kind", "computer"), json.optJSONObject("ssh"), json.optString("warning"), json.optJSONArray("routes"))
         }
     }
 }

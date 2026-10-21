@@ -70,7 +70,7 @@ async function body(request) {
 }
 
 /** Separate encrypted carrier: it exposes only Link's allowlist, never the Host admin API. */
-export async function listen({ identity, config, webRoot, store, dispatch, workbench, onError }) {
+export async function listen({ identity, config, webRoot, store, dispatch, workbench, onError, routes }) {
   const rates = new Map();
   const sockets = new Set(), sessions = new Set();
   let active = true;
@@ -127,7 +127,8 @@ export async function listen({ identity, config, webRoot, store, dispatch, workb
       }
       if (url.pathname === '/link/api/pair/status') {
         const input = await body(req);
-        return send(res, 200, store.poll(input.requestId, input.pollToken));
+        const result = store.poll(input.requestId, input.pollToken);
+        return send(res, 200, { ...result, ...(result.status === 'approved' && routes ? { routes: routes() } : {}) });
       }
       if (!['/link/api/rpc', '/link/api/workbench'].includes(url.pathname)) throw fail('未找到', 404);
       const device = store.authenticate(req.headers.authorization?.replace(/^Bearer\s+/i, ''));

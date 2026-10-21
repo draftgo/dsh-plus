@@ -115,4 +115,116 @@ Node 令牌存私有权限文件，与官方本机凭据提供器一样信任当
 
 npm run build:plus 生成服务器 seed 和 SHA256 清单，经 SSH 上传，不依赖尚未发布的 Linux 资产。新增 Android 原生多设备与 SSH 能力需重新构建客户端。
 
-SSH 隧道仅供当前客户端访问，不会自动让手机通过公网连接。手机跨网访问仍需部署者提供可达 HTTPS 地址和反代；不提供公共中转、内网穿透或自动域名。
+SSH 隧道仅供当前客户端访问，不会自动让手机通过公网连接。原有公网直连仍需可达 HTTPS 地址和反代；自有中继采用下述独立出站通道，不提供公共中转。
+
+## 自有中继（首版）
+
+一台用户自有服务器对应一个 Link 主机及独立 HTTPS origin，支持 IP 地址加高位端口，不要求域名。目标主机开机、联网并启用 Link 后主动连接中继；浏览器继续使用现有配对批准和工作台权限。TLS 在中继终止，中继运营者能读取内容，因此只能配置用户控制的可信服务器。中继凭据独立于设备令牌，不向 MCP 暴露。
+
+目标主机通过进程环境配置 `DSH_LINK_RELAY_URL=https://<公网IP>:<高位端口>` 与 `DSH_LINK_RELAY_TOKEN`（至少 32 字符的随机专用密钥）。中继密钥仅存受限权限的服务环境配置，不通过配对 URL 分享。设备中心的连接方式增加“自有中继”，仅主机通道连接后允许生成 HTTPS 配对信息；主机批准后按既有流程进入工作台。关闭 Link 会同时断开中继。当前通道在线不代表访问端网络可达，必须从实际设备验收。
+
+当前已提供核心中继通道、显式 IP 证书操作及 opt-in user systemd 自动续期 timer；真实公网 ACME、服务器 systemd 与端到端公网连接仍需在目标环境验收。SSH 一键部署、LAN 自动优先/失败回退和 Android 全路径尚未完成。旧 SSH 云端部署与直连继续可用。
+
+### IP 地址证书约束
+
+Let's Encrypt 的 IP 地址证书免费，`shortlived` profile 有效期 160 小时，需自动续期。Certbot 5.4+ 支持 IP 地址 webroot。HTTP-01 验证必须经过公网 80，TLS-ALPN-01 必须经过 443，不能把验证端口替换为业务高位端口；IP 不支持 DNS-01。中继业务可监听独立高位端口，证书不绑定端口。
+
+已有 Web 服务时仅复用其显式 HTTP-01 webroot 路径，不抢占标准端口、不自动改写 Nginx 或防火墙。不具备安全验证路径时部署应报错；不会停掉已有网站换取签发成功。IP 更换须重新签发。证书申请、续期及失败恢复仍需真实 ACME 环境验收，不能据本地测试宣称公网永久可达。
+
+依据：[IP 证书公开签发](https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability.html)、[Certbot 支持](https://letsencrypt.org/2026/03/11/shorter-certs-certbot.html)、[验证方式](https://letsencrypt.org/docs/challenge-types/)。
+
+#### 显式证书与续期操作
+
+以下命令面向 Linux 上已安装 Certbot 5.4+ 的部署者。先为公网 80 配好现有 HTTP-01 路由，并准备已存在、当前用户可写的 webroot 和状态目录；工具不会安装 Certbot，也不会改写 Web 服务或防火墙。
+
+```sh
+node scripts/ip-certificate.mjs dry-run --ip 203.0.113.10 --email admin@example.com --webroot /srv/www/acme --state-dir /var/lib/dsh-link --challenge-port 80 --relay-port 24680 --confirm-public-ip true
+node scripts/ip-certificate.mjs issue --ip 203.0.113.10 --email admin@example.com --webroot /srv/www/acme --state-dir /var/lib/dsh-link --challenge-port 80 --relay-port 24680 --confirm-public-ip true
+node scripts/ip-certificate.mjs status --state-dir /var/lib/dsh-link
+node scripts/ip-certificate.mjs renew --ip 203.0.113.10 --email admin@example.com --webroot /srv/www/acme --state-dir /var/lib/dsh-link --challenge-port 80 --relay-port 24680 --confirm-public-ip true --restart-relay-unit dsh-link-relay.service
+```
+
+`203.0.113.10` 是文档示例地址，不能用于真实签发。真实签发前须替换为服务器实际公网 IP。`renew` 仅在证书链或私钥内容变化时切换活动版本；带 `--restart-relay-unit` 时只对已运行的 `dsh-link-relay.service` 执行 try-restart。重启失败会保留待重试标记，下次运行续期时重试。
+
+自动续期默认关闭。签发成功后，只有显式运行下列命令才会安装并启用当前用户的每日 systemd timer；它运行在当前用户的 systemd manager 下，不需要 root。证书状态目录、webroot 和 Certbot 对该用户必须可用。若用户服务要在退出登录后继续运行，服务器还需自行启用该用户的 linger。
+
+```sh
+node scripts/ip-certificate.mjs install-timer --state-dir /var/lib/dsh-link
+node scripts/ip-certificate.mjs uninstall-timer
+```
+
+安装只创建 `dsh-link-ip-certificate-renew.service` 与 `dsh-link-ip-certificate-renew.timer`；同名文件已存在且不归本工具管理时会拒绝覆盖。卸载只禁用该 timer 并删除校验通过的本工具 unit，不停止或删除 relay 服务。timer 更新证书后只尝试重启固定名称 `dsh-link-relay.service`，不会重启其他服务；每日无证书变化时不会中断现有连接。
+
+timer 安装前必须先由同一 OS 用户配置并启动 `dsh-link-relay.service`。发布插件包后，工具位于 `plugins/commander/lib/relay/`；在源码仓库内开发时，对应文件位于 `plugins/link/scripts/`。
+
+复制 `relay.example.json` 到当前用户的配置目录并填写实际 IP、未占用的高位端口、随机中继密钥，以及证书活动路径。中继 TLS 私钥和配置文件都须保持当前用户所有且权限为 `0600`；随机密钥可用 `openssl rand -hex 32` 生成。
+
+```json
+{
+  "host": "0.0.0.0",
+  "port": 24680,
+  "publicUrl": "https://198.51.100.10:24680",
+  "token": "替换为 openssl rand -hex 32 生成的值",
+  "keyFile": "/home/link/.local/state/dsh-link/dsh-link-ip-certificate/active/privkey.pem",
+  "certFile": "/home/link/.local/state/dsh-link/dsh-link-ip-certificate/active/fullchain.pem"
+}
+```
+
+`198.51.100.10` 和 `/home/link` 仅为示例，须替换为真实公网 IP 和运行服务的 OS 用户路径。端口须与证书命令中的 `--relay-port` 相同，并在服务器及云防火墙中放行 TCP；若端口已被占用，中继启动会失败，换成未占用的 `20000–49151` 端口后同步更新 URL 与证书配置。将下面的绝对路径替换为该服务器上打包后的实际位置：
+
+```ini
+[Unit]
+Description=DSH Link self-hosted relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node /absolute/path/plugins/commander/lib/relay/run-relay-server.mjs --config /home/link/.config/dsh-link/relay.json
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=default.target
+```
+
+使用运行证书工具的同一 OS 用户安装 relay unit，再安装续期 timer：
+
+```sh
+install -d -m 700 "$HOME/.config/dsh-link" "$HOME/.config/systemd/user"
+chmod 600 "$HOME/.config/dsh-link/relay.json"
+install -m 600 /dev/stdin "$HOME/.config/systemd/user/dsh-link-relay.service" <<'UNIT'
+[Unit]
+Description=DSH Link self-hosted relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node /absolute/path/plugins/commander/lib/relay/run-relay-server.mjs --config /home/link/.config/dsh-link/relay.json
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=default.target
+UNIT
+systemctl --user daemon-reload
+systemctl --user enable --now dsh-link-relay.service
+systemctl --user status dsh-link-relay.service
+node /absolute/path/plugins/commander/lib/relay/ip-certificate.mjs install-timer --state-dir "$HOME/.local/state/dsh-link"
+```
+
+上例中 service unit 的 `ExecStart` 路径也须按实际安装目录和用户路径修改。退出登录后仍需常驻时，由服务器管理员按部署策略为该用户启用 linger；证书 timer 和 relay 必须使用同一用户级 systemd manager。
+
+
+### SSH 一键部署自有中继
+
+在桌面小角的「设备中心 → 连接 → 部署自有中继」填写 SSH 地址、用户名、公网 IP、证书通知邮箱与专用业务端口，核对 SSH 指纹后提交认证。服务器需 Linux/systemd、系统路径 Node 22+、npm、Python3 venv，以及 root 或免密 sudo。密码、私钥和 passphrase 仅用于此次操作。
+
+向导使用免费的 Let's Encrypt IP 短期证书，不强制域名。业务端口范围 20000–49151，不自动开放安全组或防火墙；HTTP-01 必须公网 80 可达。80 空闲时部署专用验证服务，已有站点时选择 webroot 并自行映射 `/.well-known/acme-challenge/`；不会停用已有站点或改写其配置。服务安装到 `/opt/xiaojiao-relay`，中继以独立系统用户运行，root 续期任务每日检查。重跑部署更新工具并保留中继身份；非本工具目录或同名单元拒绝接管。
+
+部署完成先验证公网可信 TLS，再自动保存并启用当前主机的出站连接。等待主机通道在线后生成配对信息，在其他设备中粘贴并回到主机批准。TLS 成功不等于手机或工作台全路径验收成功。管理面板支持状态、有限日志、启停、重启及显式卸载；再次管理需重新提供 SSH 凭据。Android 支持连接中继，当前不提供部署入口。
+
+新配对从已认证响应保存可信 routes，桌面与 Android 在打开工作台前优先探测固定 SPKI 的直连，网络不可达时回退系统 CA 验证的中继。证书异常、授权失效不降级，不重放写操作，不迁移活动流；切网后重新进入工作台。旧配对保留原单地址，需要重新配对获取多路径。浏览器通过当前 HTTPS 入口连接，不自动扫描内网。一个独立中继 origin 对应一台主机；多中继池调度未纳入此版本。

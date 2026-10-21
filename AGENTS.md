@@ -10,6 +10,7 @@
 - 应用名称为小角，DSH-Plus 为插件名称；小角是统一 Logo 与吉祥物 IP，规范及正式素材见 `assets/brand/`，PC、移动端与初始化使用同一形象。
 - 供应商模型 ID 按不透明标识处理，不猜测别名或静默改写。配置修改须验证选择、保存、重载与实际请求一致；显式选择优先于默认值，编辑单项不得丢失其他配置，不支持的能力须明确提示。
 - 根目录使用 `npm run setup/build/dev/start/check` 调用官方脚本；实际依赖由子模块锁定的 Corepack pnpm 管理。
+- 改完 DSH-Plus 或 Link 的网页后运行 `npm run reload:plus`。它重建 `plugins/commander/lib/client.js` 和 `lib/link-web/`，运行中的 Harness 约半秒内热加载；浏览器需刷新。不要为此重启 Web，也不要把服务器种子包算进这次加载。
 - `npm run check` 只检查版本、工作区与入口一致性，不代表应用构建或运行成功。按变更运行适当验证，不默认执行整个上游测试套件。
 - 图形应用仅在明确要求时启动。保留许可证与第三方版权声明。
 

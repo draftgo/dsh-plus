@@ -71,9 +71,14 @@ test('closing and reopening preserves the centre iframe and avoids a second laun
   const view = fixture(); await view.settle();
   const launch = () => view.nodes().find(node => node.props['aria-label'] === '设备中心').props.onClick();
   await launch(); await view.settle(); const frame = view.nodes().find(node => node.type === 'iframe');
-  view.nodes().find(node => node.props['aria-label'] === '关闭设备中心').props.onClick(); await view.settle();
+  view.nodes().find(node => node.props['aria-label'] === '返回工作台').props.onClick(); await view.settle();
   assert.equal(view.nodes().find(node => node.type === 'iframe').props.src, frame.props.src);
-  await launch(); await view.settle(); assert.equal(view.requests.length, 1); view.unmount();
+  await launch(); await view.settle(); assert.equal(view.requests.length, 1);
+  assert.match(textOf(view.nodes().find(node => node.type === 'style')), /data-windows-titlebar/);
+  const frameNode = view.nodes().find(node => node.type === 'iframe');
+  frameNode.props.onLoad(); await view.settle();
+  assert.match(view.nodes().find(node => node.type === 'header').props.className, /dsh-device-dialog-ready/);
+  view.unmount();
 });
 
 test('launcher carries and updates the resolved host appearance for its mounted centre', async () => {

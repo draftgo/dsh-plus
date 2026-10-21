@@ -4,6 +4,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { openDeviceRegistry, normalizeTarget } from './registry.mjs';
 import { remoteJson } from './remote.mjs';
+import { selectRoute } from './routes.mjs';
 import { createDeviceProxy } from './proxy.mjs';
 import { createServerManager } from '../server/manager.mjs';
 const secret = () => randomBytes(32).toString('base64url');
@@ -33,7 +34,10 @@ async function body(req) {
 export async function createDeviceCenter({ directory, webRoot, managerFactory = createServerManager, hostAdmin, publicOrigin, workbenchOrigin, registerProxy }) {
   const registry = await openDeviceRegistry(directory), pending = new Map(), proxies = new Map(), tickets = new Map(), sessions = new Map(), parents = new Set(), sockets = new Set();
   let origin, closed = false;
-  const manager = await managerFactory({ directory, runtimeRoot: new URL('../server/', webRoot), onDevice: async device => {
+  const manager = await managerFactory({ directory, onRelay: async value => {
+    if (typeof hostAdmin !== 'function') throw fail('此客户端不支持配置主机中继');
+    await hostAdmin({ action: 'relay-configure', url: value.url, token: value.token, enabled: true });
+  }, runtimeRoot: new URL('../server/', webRoot), onDevice: async device => {
     if (device.status === 'offline') { try { registry.mark(device.id, 'offline', device.lastError); } catch {} return; }
     const proxy = proxies.get(device.id); if (proxy) { proxies.delete(device.id); await proxy.close(); }
     return registry.upsert(device);
@@ -41,11 +45,11 @@ export async function createDeviceCenter({ directory, webRoot, managerFactory = 
   const idOf = input => input.deviceId || input.targetId || input.id;
   const api = async input => {
     const id = idOf(input);
-    if (input.action === 'list') return { ...registry.list(), capabilities: { ssh: Boolean(manager), hostAdmin: typeof hostAdmin === 'function' } };
-    const hostActions = { hostCloudAccess: 'cloud-access', hostStatus: 'status', hostConfigure: 'configure', hostPairing: 'pairing', hostConfirm: 'confirm', hostReject: 'reject', hostRevoke: 'revoke' };
+    if (input.action === 'list') return { ...registry.list(), capabilities: { ssh: Boolean(manager), relayDeploy: Boolean(manager?.deployRelay) && typeof hostAdmin === 'function', hostAdmin: typeof hostAdmin === 'function' } };
+    const hostActions = { hostRelayConfigure: 'relay-configure', hostCloudAccess: 'cloud-access', hostStatus: 'status', hostConfigure: 'configure', hostPairing: 'pairing', hostConfirm: 'confirm', hostReject: 'reject', hostRevoke: 'revoke' };
     if (Object.hasOwn(hostActions, input.action)) {
       if (typeof hostAdmin !== 'function') throw fail('此客户端不支持本机连接管理，请更新应用');
-      const fields = { hostCloudAccess: ['operation', 'key'], hostStatus: [], hostConfigure: ['enabled', 'host', 'port', 'publicUrl'], hostPairing: ['mode', 'address'], hostConfirm: ['id'], hostReject: ['id'], hostRevoke: ['id'] }[input.action];
+      const fields = { hostRelayConfigure: ['url', 'token', 'enabled'], hostCloudAccess: ['operation', 'key'], hostStatus: [], hostConfigure: ['enabled', 'host', 'port', 'publicUrl'], hostPairing: ['mode', 'address'], hostConfirm: ['id'], hostReject: ['id'], hostRevoke: ['id'] }[input.action];
       return hostAdmin({ action: hostActions[input.action], ...Object.fromEntries(fields.filter(key => Object.hasOwn(input, key)).map(key => [key, input[key]])) });
     }
     if (input.action === 'pair') {
@@ -62,28 +66,36 @@ export async function createDeviceCenter({ directory, webRoot, managerFactory = 
       if (pair.device) return { status: 'approved', device: pair.device };
       const { value } = await remoteJson(pair, '/link/api/pair/status', { requestId: pair.remote.requestId, pollToken: pair.remote.pollToken });
       if (value.status !== 'approved') return { status: value.status };
-      pair.device = await registry.upsert({ ...pair, remote: undefined, token: value.token, kind: 'computer', name: new URL(pair.url).hostname });
+      pair.device = await registry.upsert({ ...pair, remote: undefined, token: value.token, routes: value.routes, kind: 'computer', name: new URL(pair.url).hostname });
       return { status: 'approved', device: pair.device };
     }
     if (input.action === 'select') {
       if (id === 'local') return { device: await registry.select(id), url: null };
       if (publicOrigin && !workbenchOrigin) throw fail('请先配置独立 HTTPS 工作台域名，云端连接不能使用本机地址', 409);
-      const target = registry.get(id);
+      const savedTarget = registry.get(id);
+      const target = await selectRoute(savedTarget);
       let proxy = proxies.get(id);
+      if (proxy && proxy.routeKey !== `${target.url}|${target.pin || ''}`) { proxies.delete(id); await proxy.close(); proxy = undefined; }
       try {
         if (!proxy) {
           const published = publicOrigin ? registerProxy() : null;
           try {
             proxy = await createDeviceProxy(target, { webRoot, ...(published ? { publicOrigin: workbenchOrigin, publicPrefix: published.prefix } : {}), parentOrigin: [origin, publicOrigin, ...parents].filter(Boolean).join(' '), onFailure: error => registry.mark(id, 'offline', error.message) });
-            published?.attach(proxy); proxies.set(id, proxy);
+            proxy.routeKey = `${target.url}|${target.pin || ''}`; published?.attach(proxy); proxies.set(id, proxy);
           } catch (error) { published?.remove(); throw error; }
         }
-        const url = await proxy.enter(); registry.mark(id, 'online'); return { device: await registry.select(id), url };
+        const url = await proxy.enter(); registry.markRoute(id, target.routes?.find(route => route.url === target.url && (route.pin || '') === (target.pin || ''))?.kind || 'direct'); registry.mark(id, 'online'); return { device: await registry.select(id), url };
       } catch (error) { registry.mark(id, 'offline', error.message); throw error; }
     }
     if (input.action === 'rename') return { device: await registry.rename(id, input.name) };
     if (input.action === 'remove') { await registry.remove(id); const proxy = proxies.get(id); proxies.delete(id); await proxy?.close(); await manager?.disconnect?.(id); return { ok: true }; }
     if (!manager) throw fail('此客户端不支持 SSH，请更新应用');
+    if (input.action === 'relayProbe') return manager.relayProbe(input);
+    if (input.action === 'relayDeploy') {
+      if (typeof hostAdmin !== 'function') throw fail('此客户端不支持配置主机中继');
+      return manager.deployRelay(input);
+    }
+    if (input.action === 'relayAction') return manager.manageRelay(input);
     if (input.action === 'sshProbe') return manager.probe(input);
     if (input.action === 'sshConnect') return manager.connect(input);
     if (input.action === 'job') return manager.job(input.jobId || input.id);

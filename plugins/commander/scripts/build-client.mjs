@@ -25,7 +25,9 @@ await mkdir(new URL('../lib/', import.meta.url), { recursive: true });
 await writeFile(out, `window.__ModuleLoader__.load({id: 'dsh-plus', factory: (require) => { const module = {exports:{}}; const exports = module.exports;\n${result.outputFiles[0].text}\nreturn module.exports; }});\n`);
 console.log('DSH-Plus client built');
 
-// Build finite server payload after the client; its own output is excluded.
-const { packageServerSeed } = await import('../../../scripts/server/package-seed.mjs');
-await packageServerSeed();
-await (await import('node:fs/promises')).cp(new URL('../../link/dist/server/', import.meta.url), new URL('../lib/server/', import.meta.url), { recursive: true });
+// Server seed is a release payload. A running web reload only needs the client bundle.
+if (!process.argv.includes('--client')) {
+  const { packageServerSeed } = await import('../../../scripts/server/package-seed.mjs');
+  await packageServerSeed();
+  await (await import('node:fs/promises')).cp(new URL('../../link/dist/server/', import.meta.url), new URL('../lib/server/', import.meta.url), { recursive: true });
+}

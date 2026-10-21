@@ -7,7 +7,7 @@ export const deviceRuntime = {
     if (action === 'cloud-access' && globalThis.location?.protocol === 'https:' && globalThis.location.pathname.startsWith('/devices/')) {
       return fetch(new URL('/api/commander-link', location.origin), { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, ...input }), signal: AbortSignal.timeout(10000) }).then(async response => { const value = await response.json(); if (!response.ok || value.error) throw new Error(value.error || '访问密钥更新失败'); return value; });
     }
-    const actions = { 'cloud-access': 'hostCloudAccess', status: 'hostStatus', configure: 'hostConfigure', pairing: 'hostPairing', confirm: 'hostConfirm', reject: 'hostReject', revoke: 'hostRevoke' };
+    const actions = { relayConfigure: 'hostRelayConfigure', 'cloud-access': 'hostCloudAccess', status: 'hostStatus', configure: 'hostConfigure', pairing: 'hostPairing', confirm: 'hostConfirm', reject: 'hostReject', revoke: 'hostRevoke' };
     if (!actions[action]) return Promise.reject(new Error('当前设备中心不支持此高级设置，请在主机设置中操作'));
     return deviceRuntime.call(actions[action], input);
   },

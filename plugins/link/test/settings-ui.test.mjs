@@ -134,3 +134,20 @@ test('embedded settings use owner device transport and keep advanced options col
   assert(advanced); assert.equal(advanced.props.open, undefined); assert(nodes(advanced).some(node => node.props.management === props.management));
   assert.doesNotMatch(textOf(tree), /连接手机|App 地址/);
 });
+
+
+test('relay pairing uses its own mode without overwriting public URL and blocks offline pairing', async () => {
+  const view = fixture({ origin: 'http://localhost:3000' });
+  view.status.relay = { configured: true, connected: true };
+  view.render(); view.effects[1](); await new Promise(resolve => setImmediate(resolve));
+  let tree = view.render();
+  const select = nodes(tree).find(node => node.type === 'Select' && node.props['aria-label'] === '连接方式');
+  assert(nodes(select).some(node => node.type === 'option' && node.props.value === 'relay' && !node.props.disabled));
+  select.props.onChange({ target: { value: 'relay' } });
+  await view.find(view.render(), '生成连接信息').props.onClick();
+  assert.equal(view.calls.at(-1).input.mode, 'relay');
+  assert.equal(view.calls.some(call => call.action === 'configure'), false);
+  view.status.relay.connected = false;
+  await view.effects[1](); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(view.find(view.render(), '生成连接信息').props.disabled, true);
+});

@@ -19,7 +19,7 @@ test('published plugin payload excludes development/private files and contains i
   const { root, put } = fixture(t);
   const manifest = { name: 'dsh-plus', version: '0.1.0', type: 'module', files: ['src', 'lib', 'voice', 'cordis.patch.yml'], dsh: { bundle: { patch: './cordis.patch.yml' } }, dependencies: { 'fixture-required': '1.0.0' }, devDependencies: { 'fixture-dev': '1.0.0' }, optionalDependencies: { 'fixture-linux': '1.0.0' } };
   put('plugin/package.json', manifest);
-  for (const name of ['src/plugin.mjs', 'lib/client.js', 'lib/link.mjs', 'lib/link-web/index.html', 'voice/src/plugin.mjs', 'cordis.patch.yml']) put(`plugin/${name}`, 'fixture');
+  for (const name of ['src/plugin.mjs', 'lib/client.js', 'lib/link.mjs', 'lib/link-web/index.html', 'lib/relay/run-relay-server.mjs', 'lib/relay/ip-certificate.mjs', 'lib/relay/relay.example.json', 'voice/src/plugin.mjs', 'cordis.patch.yml']) put(`plugin/${name}`, 'fixture');
   put('plugin/private-credentials.txt', 'do-not-package');
   for (const name of ['fixture-required', 'fixture-dev', 'fixture-linux']) {
     put(`plugin/node_modules/${name}/package.json`, { name, version: '1.0.0', ...(name === 'fixture-linux' ? { os: ['linux'] } : {}) });
@@ -43,7 +43,7 @@ const officialRoot = resolve(import.meta.dirname, '../../deepseek-harness');
 test('SSH optional build-machine addons never enter desktop plugin releases', t => {
   const { root, put } = fixture(t);
   put('plugin/package.json', { name: 'dsh-plus', version: '0.1.0', files: ['src', 'lib', 'voice', 'cordis.patch.yml'], dsh: { bundle: { patch: './cordis.patch.yml' } }, dependencies: { ssh2: '1.17.0' } });
-  for (const name of ['src/plugin.mjs', 'lib/client.js', 'lib/link.mjs', 'lib/link-web/index.html', 'voice/src/plugin.mjs', 'cordis.patch.yml']) put('plugin/' + name, 'fixture');
+  for (const name of ['src/plugin.mjs', 'lib/client.js', 'lib/link.mjs', 'lib/link-web/index.html', 'lib/relay/run-relay-server.mjs', 'lib/relay/ip-certificate.mjs', 'lib/relay/relay.example.json', 'voice/src/plugin.mjs', 'cordis.patch.yml']) put('plugin/' + name, 'fixture');
   put('plugin/node_modules/ssh2/package.json', { name: 'ssh2', version: '1.17.0', optionalDependencies: { 'cpu-features': '0.0.10' } });
   put('plugin/node_modules/ssh2/lib/index.js', 'module.exports = {};');
   put('plugin/node_modules/ssh2/lib/protocol/crypto.js', 'module.exports = {};');
@@ -101,7 +101,7 @@ function seedFixture(put, prefix, version = '0.1.0') {
   const bundleName = releaseBundleName(version);
   put(`${prefix}/release.json`, { schemaVersion: 1, version, platform: process.platform, arch: process.arch, shared: [] });
   put(`${prefix}/node_modules/dsh-plus/package.json`, { name: 'dsh-plus', version, type: 'module', main: './src/plugin.mjs', exports: { '.': './src/plugin.mjs', './client': './lib/client.js', './package.json': './package.json' }, dsh: { bundle: { patch: './cordis.patch.yml' } } });
-  for (const file of ['src/plugin.mjs', 'lib/client.js', 'lib/link.mjs', 'lib/link-web/index.html', 'voice/src/plugin.mjs']) put(`${prefix}/node_modules/dsh-plus/${file}`, `export const version = ${JSON.stringify(version)}; export default true;`);
+  for (const file of ['src/plugin.mjs', 'lib/client.js', 'lib/link.mjs', 'lib/link-web/index.html', 'lib/relay/run-relay-server.mjs', 'lib/relay/ip-certificate.mjs', 'lib/relay/relay.example.json', 'voice/src/plugin.mjs']) put(`${prefix}/node_modules/dsh-plus/${file}`, `export const version = ${JSON.stringify(version)}; export default true;`);
   const patch = "- insert:\n    - id: commander\n      name: 'dsh-plus'\n";
   put(`${prefix}/node_modules/dsh-plus/cordis.patch.yml`, patch);
   put(`${prefix}/node_modules/${bundleName}/package.json`, { name: bundleName, displayName: 'DSH-Plus', version, type: 'module', dependencies: { 'dsh-plus': version }, dsh: { bundle: { patch: './cordis.patch.yml' } } });

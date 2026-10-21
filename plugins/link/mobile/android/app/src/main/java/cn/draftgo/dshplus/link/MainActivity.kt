@@ -384,14 +384,15 @@ class LinkBridge(private val context: MainActivity, private val onIdentity: (Str
         val generation = connectionGeneration.get()
         executor.execute {
             runCatching {
-                val client = clientFor(identity)
-                val request = Request.Builder().url(identity.url + "/link/api/workbench").header("Authorization", "Bearer ${identity.token}").post("{}".toRequestBody("application/json".toMediaType())).build()
+                val chosen = chooseRoute(identity)
+                val client = clientFor(chosen)
+                val request = Request.Builder().url(chosen.url + "/link/api/workbench").header("Authorization", "Bearer ${identity.token}").post("{}".toRequestBody("application/json".toMediaType())).build()
                 client.newCall(request).execute().use { result ->
                     val body = JSONObject(result.body?.string() ?: "{}")
                     require(result.isSuccessful) { body.optString("error", "工作台连接失败") }
                     require(body.optString("url") == "/link/workbench/") { "工作台地址无效" }
                     val cookie = result.headers.values("Set-Cookie").singleOrNull { it.contains("Path=/link/workbench/", true) && it.contains("HttpOnly", true) } ?: throw IllegalStateException("工作台未返回设备会话")
-                    if (generation == connectionGeneration.get() && store.selectedId() == identity.id) context.openWorkbench(identity, cookie) { generation == connectionGeneration.get() && store.selectedId() == identity.id }
+                    if (generation == connectionGeneration.get() && store.selectedId() == identity.id) context.openWorkbench(chosen, cookie) { generation == connectionGeneration.get() && store.selectedId() == identity.id }
                 }
             }.onFailure { if (generation == connectionGeneration.get()) context.workbenchFailed(connectionFailureMessage(it, identity.url, identity.pin.isNotEmpty())) }
         }
@@ -451,7 +452,7 @@ class LinkBridge(private val context: MainActivity, private val onIdentity: (Str
                 val result = post(pair.identity, "/link/api/pair/status", JSONObject().put("requestId", id).put("pollToken", pair.pollToken))
                 if (result.optString("status") == "approved") {
                     val previous = store.all().firstOrNull { it.hostKey == pair.identity.hostKey }
-                    val device = pair.identity.copy(token = result.getString("token"), code = "", id = previous?.id ?: pair.identity.id)
+                    val device = pair.identity.copy(token = result.getString("token"), code = "", id = previous?.id ?: pair.identity.id, routes = trustedRoutes(result.optJSONArray("routes")))
                     store.write(device, false); pairs.remove(id)
                     JSONObject().put("status", "approved").put("device", device.publicJson())
                 } else { if (result.optString("status") == "rejected") pairs.remove(id); JSONObject().put("status", result.optString("status")) }
@@ -467,6 +468,40 @@ class LinkBridge(private val context: MainActivity, private val onIdentity: (Str
             "serverAction" -> servers.manage(input, store.get(targetId) ?: error("设备不存在"))
             else -> error("不支持的设备操作")
         }
+    }
+
+    // Candidate origins come only from the authenticated pairing response. Never retry writes.
+    private fun trustedRoutes(raw: org.json.JSONArray?): org.json.JSONArray? {
+        if (raw == null) return null
+        require(raw.length() <= 16) { "连接路由过多" }
+        return org.json.JSONArray().apply {
+            for (i in 0 until raw.length()) {
+                val route = raw.getJSONObject(i)
+                val kind = route.optString("kind")
+                require(kind == "direct" || kind == "relay") { "连接路由类型无效" }
+                val checked = Identity.parse(JSONObject().put("url", route.getString("url")).put("pin", route.optString("pin")).put("token", "validation"))
+                require((kind == "direct" && checked.pin.isNotEmpty()) || (kind == "relay" && checked.pin.isEmpty())) { "连接路由信任配置无效" }
+                put(JSONObject().put("url", checked.url).put("pin", checked.pin).put("kind", kind))
+            }
+        }
+    }
+    private fun chooseRoute(identity: Identity): Identity {
+        if (identity.kind == "ssh" || identity.routes == null) return identity
+        val routes = trustedRoutes(identity.routes) ?: return identity
+        val candidates = (0 until routes.length()).map { routes.getJSONObject(it) }.sortedBy { if (it.optString("kind") == "direct") 0 else 1 }
+        var last: java.io.IOException? = null
+        for (route in candidates) {
+            val candidate = identity.copy(url = route.getString("url"), pin = route.optString("pin"))
+            try {
+                val client = clientFor(candidate).newBuilder().connectTimeout(2, TimeUnit.SECONDS).readTimeout(3, TimeUnit.SECONDS).build()
+                client.newCall(Request.Builder().url(candidate.url + "/link/api/info").get().build()).execute().use {
+                    require(it.isSuccessful) { "连接探测失败（HTTP ${it.code}）" }
+                    return candidate
+                }
+            } catch (error: javax.net.ssl.SSLException) { throw error }
+            catch (error: java.io.IOException) { last = error }
+        }
+        throw last ?: java.io.IOException("无可用连接路由")
     }
 
     private fun post(identity: Identity, path: String, body: JSONObject): JSONObject {

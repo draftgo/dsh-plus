@@ -153,3 +153,15 @@ test('voice proxy closes excessive preconnect backlog instead of accumulating au
   for (let i = 0; i < 41; i++) ws.send(Buffer.from([i]));
   await ended; assert.match(f.failures[0]?.message, /实时语音连接尚未就绪/);
 });
+
+test('relay deployment owner callback saves credentials without exposing them in jobs', async t => {
+  const directory = await temp(t), calls = [];
+  let options;
+  const center = await createDeviceCenter({ directory, webRoot: new URL('../dist/web/', import.meta.url), hostAdmin: async value => { calls.push(value); return { relay: { connected: false } }; }, managerFactory: value => { options = value; return { close: async () => {}, relayProbe: async () => ({ fingerprint: 'SHA256:test' }), deployRelay: async () => { await value.onRelay({ url: 'https://relay.test:24680', token: 'private-relay-secret' }); return { jobId: 'job' }; }, manageRelay: async input => ({ operation: input.operation }) }; } });
+  t.after(() => center.close());
+  assert.equal((await center.api({ action: 'list' })).capabilities.relayDeploy, true);
+  assert.deepEqual(await center.api({ action: 'relayDeploy' }), { jobId: 'job' });
+  assert.deepEqual(calls[0], { action: 'relay-configure', url: 'https://relay.test:24680', token: 'private-relay-secret', enabled: true });
+  await center.api({ action: 'hostRelayConfigure', enabled: false, operation: 'shell', password: 'discard' });
+  assert.deepEqual(calls[1], { action: 'relay-configure', enabled: false });
+});
