@@ -1,9 +1,11 @@
 /** A local, sandboxed splash shown before the official backend starts. */
-export async function openStartupWindow({ app, BrowserWindow, page }) {
+export async function openStartupWindow({ app, BrowserWindow, nativeImage, page, iconPath }) {
+  const icon = iconPath && nativeImage ? nativeImage.createFromPath(iconPath) : undefined;
   const window = new BrowserWindow({
     width: 420, height: 300, useContentSize: true, center: true,
     frame: false, resizable: false, maximizable: false, fullscreenable: false,
     show: false, backgroundColor: '#171819', title: '小角',
+    ...(icon && !icon.isEmpty() ? { icon } : {}),
     webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true },
   });
   const waiting = new Map();

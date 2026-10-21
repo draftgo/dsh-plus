@@ -5,7 +5,7 @@ body { margin: 0; }
 main { position: relative; min-height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 40px 24px; isolation: isolate; pointer-events: none; }
 main::before { content: ""; position: absolute; inset: 10px; border: 1px solid #2a2e31; border-radius: 8px; z-index: -1; }
 .startup-brand { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; }
-.startup-mascot { display: block; flex: none; width: 76px; height: 76px; object-fit: contain; }
+.startup-mascot { display: block; flex: none; width: 76px; height: 76px; object-fit: contain; border-radius: 18px; background: #222222; }
 .startup-engine { margin-top: 6px; color: #7e878d; font-size: 10px; line-height: 16px; letter-spacing: 0; }
 h1 { margin: 0; font-size: 25px; line-height: 1.4; font-weight: 600; letter-spacing: 0; }
 p { margin: 14px 0 0; min-height: 20px; color: #a1aaaf; font-size: 12px; line-height: 20px; text-align: center; }
@@ -17,7 +17,7 @@ button:focus-visible { outline: 2px solid #9bd6dd; outline-offset: 3px; }
 button:disabled { opacity: .5; cursor: default; }
 .startup-splash main { padding: 26px 24px; }
 .startup-splash .startup-brand { gap: 12px; }
-.startup-splash .startup-mascot { width: 64px; height: 64px; }
+.startup-splash .startup-mascot { width: 64px; height: 64px; border-radius: 14px; }
 .startup-splash h1 { font-size: 22px; }
 .startup-splash .startup-loading { margin-top: 22px; }
 .startup-splash p { margin-top: 12px; }

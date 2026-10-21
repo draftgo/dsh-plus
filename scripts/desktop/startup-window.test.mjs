@@ -22,7 +22,8 @@ function fixture(fail = false) {
     show() { this.visible = true; this.emit('show'); }
     destroy() { this.destroyed = true; this.emit('closed'); }
   }
-  return { app, BrowserWindow, windows, page: '/renderer/splash.html' };
+  const nativeImage = { createFromPath: path => ({ path, isEmpty: () => !path }) };
+  return { app, BrowserWindow, nativeImage, windows, page: '/renderer/splash.html', iconPath: 'icon.png' };
 }
 
 test('splash covers hidden backend startup and disposes only when another window appears', async () => {
@@ -32,6 +33,7 @@ test('splash covers hidden backend startup and disposes only when another window
   const main = new env.BrowserWindow({ show: false });
   assert.equal(splash.isVisible(), true);
   assert.equal(splash.isDestroyed(), false);
+  assert.equal(splash.options.icon.path, 'icon.png');
   assert.equal(splash.options.webPreferences.sandbox, true);
   assert.equal(splash.options.webPreferences.preload, undefined);
   assert.deepEqual(splash.openHandler(), { action: 'deny' });

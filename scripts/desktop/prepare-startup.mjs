@@ -13,7 +13,7 @@ export function startupWindowPlugin(mainPath) {
       if (resolve(id) !== target) return null;
       let code = source.replaceAll('\r\n', '\n');
       for (const [before, after] of [
-        ['async function main() {', "async function main() {\n    closeXiaojiaoStartup = await openStartupWindow({ app, BrowserWindow, page: join(app.getAppPath(), 'renderer', 'splash.html') });"],
+        ['async function main() {', "async function main() {\n    closeXiaojiaoStartup = await openStartupWindow({ app, BrowserWindow, nativeImage, page: join(app.getAppPath(), 'renderer', 'splash.html'), iconPath: join(process.resourcesPath, 'icon.png') });"],
         ['function reportFatal(error, source) {', 'function reportFatal(error, source) {\n    closeXiaojiaoStartup?.();'],
       ]) {
         if (code.split(before).length !== 2) throw new Error('Official startup changed; review startup window integration');
@@ -29,7 +29,8 @@ export function startupWindowPlugin(mainPath) {
 }
 
 export function verifyStartupBundle(source) {
-  if (!source.includes('splash.html') || !/closeXiaojiaoStartup\s*=\s*await openStartupWindow\(/.test(source)
+  if (!source.includes('splash.html') || !source.includes("join(process.resourcesPath, 'icon.png')")
+    || !/closeXiaojiaoStartup\s*=\s*await openStartupWindow\(/.test(source)
     || !/function reportFatal\(error, source\)\s*\{\s*closeXiaojiaoStartup\?\.\(\)/.test(source)) {
     throw new Error('Compiled desktop is missing the startup window lifecycle');
   }
