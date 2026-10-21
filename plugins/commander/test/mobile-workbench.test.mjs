@@ -7,6 +7,7 @@ import { transformSync } from 'esbuild';
 import { trackFrameResize } from '../client/resize-settling.mjs';
 
 const React = createRequire(new URL('../../../deepseek-harness/packages/client/ui-sidebar/package.json', import.meta.url))('react');
+const { createPortal } = createRequire(new URL('../../../deepseek-harness/packages/client/ui-renderer/package.json', import.meta.url))('react-dom');
 const { createRoot } = createRequire(new URL('../../../deepseek-harness/packages/client/ui-renderer/package.json', import.meta.url))('react-dom/client');
 const { JSDOM } = createRequire(new URL('../../../deepseek-harness/package.json', import.meta.url))('jsdom');
 const source = readFileSync(new URL('../client/mobile-workbench.jsx', import.meta.url), 'utf8');
@@ -14,7 +15,7 @@ const css = readFileSync(new URL('../client/mobile-workbench.css', import.meta.u
 const compiled = transformSync(source, { loader: 'jsx', format: 'cjs' }).code;
 
 test('shared mobile shell uses official navigation, traps drawer focus, restores interaction and keeps typed input', async () => {
-  const dom = new JSDOM('<!doctype html><div class="cmd-shell-frame" data-plus-shell data-sidebar-collapsed><div id="drawer"><div class="cmd-shell-sidebar"><button id="first">收起</button><button class="cmd-session">最近对话</button><button id="last" class="cmd-settings">设置</button></div></div><main class="centerCol"><input value="保留的草稿"></main><div data-rightbar-col></div><div data-shell-overlay id="react"></div></div>', { pretendToBeVisual: true });
+  const dom = new JSDOM('<!doctype html><div class="cmd-shell-frame" data-plus-shell data-sidebar-collapsed><div id="drawer"><div class="cmd-shell-sidebar"><button id="first">收起</button><button class="cmd-session">最近对话</button><button id="last" class="cmd-settings">设置</button></div></div><main class="centerCol"><section><header><div data-conversation-header-leading><div data-cmd-mobile-leading></div></div><div class="titleRow"><span>hi</span></div></header><section id="conversation"><input value="保留的草稿"></section></section></main><div data-rightbar-col></div><div data-shell-overlay><div id="react"></div></div></div>', { pretendToBeVisual: true });
   const query = new dom.window.EventTarget(); query.matches = true;
   dom.window.matchMedia = () => query;
   Object.defineProperty(dom.window, 'innerHeight', { value: 720, writable: true });
@@ -27,7 +28,7 @@ test('shared mobile shell uses official navigation, traps drawer focus, restores
   const module = { exports: {} };
   // Browser-dispatched touch clicks may checkpoint microtasks between native
   // listeners, before React's delegated listener receives the original target.
-  runInNewContext(compiled, { module, exports: module.exports, window: dom.window, document: dom.window.document, MutationObserver: dom.window.MutationObserver, requestAnimationFrame: callback => setTimeout(callback, 0), cancelAnimationFrame: clearTimeout, queueMicrotask: callback => callback(), require: id => id === 'react' ? React : id.endsWith('.css') ? css : id.includes('resize-settling') ? { trackFrameResize: () => () => {} } : { UIIcon: ({ name, selected }) => React.createElement('span', { 'data-icon': name, 'data-selected': selected }) } });
+  runInNewContext(compiled, { module, exports: module.exports, window: dom.window, document: dom.window.document, MutationObserver: dom.window.MutationObserver, requestAnimationFrame: callback => setTimeout(callback, 0), cancelAnimationFrame: clearTimeout, queueMicrotask: callback => callback(), require: id => id === 'react' ? React : id === 'react-dom' ? { createPortal } : id.includes('device-launcher') ? { DeviceLauncher: ({ compact }) => React.createElement('button', { 'data-device-compact': compact }, '设备') } : id.endsWith('.css') ? css : id.includes('resize-settling') ? { trackFrameResize: () => () => {} } : { UIIcon: ({ name, selected }) => React.createElement('span', { 'data-icon': name, 'data-selected': selected }) } });
   const frame = dom.window.document.querySelector('.cmd-shell-frame');
   let starts = 0, toggles = 0, opened = 0;
   document.addEventListener('click', event => {
@@ -42,39 +43,56 @@ test('shared mobile shell uses official navigation, traps drawer focus, restores
   try {
     await flush(() => root.render(React.createElement(module.exports.MobileWorkbench, { ctx })));
     assert.equal(document.documentElement.style.getPropertyValue('--cmd-mobile-viewport-height'), '720px');
-    assert.equal(document.querySelector('.cmd-mobile-toolbar button').getAttribute('aria-expanded'), 'false');
-    await click('.cmd-mobile-toolbar button');
+    assert.equal(document.querySelector('[data-conversation-header-leading] .cmd-mobile-navigation')?.tagName, 'DIV');
+    assert.equal(document.querySelector('.cmd-mobile-navigation > button').getAttribute('aria-expanded'), 'false');
+    await click('.cmd-mobile-navigation > button');
     assert.equal(toggles, 1);
     assert.equal(document.querySelector('#drawer').getAttribute('aria-modal'), 'true');
-    assert.equal(document.querySelector('main').inert, true);
+    assert.notEqual(document.querySelector('main').inert, true);
+    assert.equal(document.querySelector('#conversation').inert, true);
+    assert.equal(document.querySelector('.titleRow').inert, true);
+    assert.equal(document.querySelector('.cmd-mobile-device').hasAttribute('inert'), true);
+    assert.equal(document.querySelector('[data-device-compact]').dataset.deviceCompact, 'true');
+    assert.equal(document.querySelector('[data-shell-overlay] .cmd-mobile-drawer-mask')?.tagName, 'BUTTON');
     assert.equal(document.activeElement.id, 'first');
     document.querySelector('#last').focus();
     await flush(() => document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })));
-    assert.equal(document.activeElement.id, 'first');
+    assert.equal(document.activeElement.getAttribute('aria-label'), '收起侧边栏');
     await flush(() => document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
     assert.equal(toggles, 2);
     assert.notEqual(document.querySelector('main').inert, true);
     assert.equal(document.querySelector('#drawer').hasAttribute('role'), false);
     assert.equal(document.activeElement.getAttribute('aria-label'), '打开侧边栏');
     assert.equal(document.querySelector('main input').value, '保留的草稿');
-    await click('.cmd-mobile-toolbar button');
+    await click('.cmd-mobile-navigation > button');
     await click('.cmd-session');
     assert.equal(toggles, 4);
     assert.equal(opened, 1);
-    await click('.cmd-mobile-toolbar button:last-child');
-    assert.equal(starts, 1);
-    await click('.cmd-mobile-toolbar button');
+    assert.equal(document.querySelector('.cmd-mobile-toolbar'), null);
+    assert.equal(starts, 0, 'new chats stay with the existing sidebar');
+    await click('.cmd-mobile-navigation > button');
     await click('.cmd-settings');
     await flush(() => new Promise(resolve => setTimeout(resolve, 30)));
     assert.equal(toggles, 6);
     assert.notEqual(document.querySelector('main').inert, true);
-    await click('.cmd-mobile-toolbar button');
+    await click('.cmd-mobile-navigation > button');
     await click('.cmd-mobile-drawer-mask');
     assert.equal(toggles, 8);
+    await click('.cmd-mobile-navigation > button');
+    assert.equal(toggles, 9);
+    await click('.cmd-mobile-navigation > button');
+    assert.equal(toggles, 10, 'the header toggle stays operable while the drawer is open');
+    await flush(() => document.querySelector('[data-cmd-mobile-leading]').remove());
+    assert.equal(document.querySelector('[data-shell-overlay] .cmd-mobile-navigation-fallback')?.tagName, 'DIV');
+    await click('.cmd-mobile-navigation > button');
+    assert.equal(document.querySelector('main').inert, true, 'panels without a conversation header retain modal navigation');
+    await click('.cmd-mobile-drawer-mask');
+    assert.notEqual(document.querySelector('main').inert, true);
     await flush(() => { window.innerHeight = 420; window.dispatchEvent(new dom.window.Event('resize')); });
     assert.equal(document.documentElement.style.getPropertyValue('--cmd-mobile-viewport-height'), '420px');
     await flush(() => { query.matches = false; query.dispatchEvent(new dom.window.Event('change')); });
     assert.equal(document.querySelector('.cmd-mobile-workbench').hidden, true);
+    assert.equal(document.querySelector('[data-device-compact]'), null, 'desktop must not announce a hidden mobile launcher');
     assert.equal(document.documentElement.style.getPropertyValue('--cmd-mobile-viewport-height'), '');
   } finally {
     await flush(() => root.unmount());
@@ -86,10 +104,11 @@ test('shared mobile shell uses official navigation, traps drawer focus, restores
 test('adapter owns reversible CSS/slot only; official settings and editor remain the source of truth', () => {
   const dom = new JSDOM('<!doctype html>'), module = { exports: {} }, cleanups = [], registrations = [];
   runInNewContext(compiled, { module, exports: module.exports, document: dom.window.document, require: id => id === 'react' ? React : id.endsWith('.css') ? css : {} });
-  const ctx = { effect: callback => cleanups.push(callback()), slots: { inject: (name, callback) => { assert.equal(name, 'shell.overlay'); callback(); }, register: (options, component) => registrations.push({ options, component }) } };
+  const ctx = { effect: callback => cleanups.push(callback()), slots: { inject: (name, callback) => { assert(['conversation.header.leading', 'shell.overlay'].includes(name)); callback(); }, register: (options, component) => registrations.push({ options, component }) } };
   module.exports.applyMobileWorkbench(ctx);
-  assert.equal(registrations.length, 1);
-  assert.equal(registrations[0].options.inject().ctx, ctx);
+  assert.equal(registrations.length, 2);
+  assert.equal(registrations[1].options.inject().ctx, ctx);
+  assert.equal(registrations[0].options.name, 'conversation.header.leading');
   assert.equal(dom.window.document.querySelectorAll('style[data-commander-mobile-workbench]').length, 1);
   assert.match(css, /grid-column: 2; grid-row: 1/);
   assert.match(css, /\.cmd-shell-sidebar:has\(\.cmd-projects\) \* \{ animation: none !important; transition: none !important; \}/);
@@ -103,7 +122,7 @@ test('adapter owns reversible CSS/slot only; official settings and editor remain
 });
 
 test('mobile header clears safe areas and cancels the desktop corner overhang', () => {
-  assert.match(css, /header:has\(\[data-conversation-header-leading\]\)\s*\{[\s\S]*?padding-inline-start: max\(12px, env\(safe-area-inset-left, 0px\)\);[\s\S]*?padding-inline-end: max\(12px, env\(safe-area-inset-right, 0px\)\);/);
+  assert.match(css, /header:has\(\[data-conversation-header-leading\]\)\s*\{[\s\S]*?padding-inline-start: max\(6px, env\(safe-area-inset-left, 0px\)\);[\s\S]*?padding-inline-end: max\(8px, env\(safe-area-inset-right, 0px\)\);/);
   assert.match(css, /\[data-conversation-header-corner\]\s*\{ margin-inline-end: 0; \}/);
 });
 

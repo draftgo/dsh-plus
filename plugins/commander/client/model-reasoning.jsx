@@ -1,3 +1,4 @@
+import { Select } from '../../shared/client/select.jsx';
 import React from 'react';
 import { reasoningLevels, reasoningPresets, reasoningError, withModelReasoning } from './model-reasoning-state.mjs';
 
@@ -13,11 +14,11 @@ export function ModelReasoningEditor({ model, position, disabled, onChange, styl
   return <fieldset disabled={disabled} className={styles.modelInputTypes}>
     <legend className={styles.modelFieldLabel}>思考档位</legend>
     <div style={{ display: 'grid', gap: 8, minWidth: 0 }}>
-      <select className={styles.input} aria-label={prefix} value={mode} onChange={event => update(event.target.value === 'inherit' ? undefined : event.target.value === 'disabled' ? false : { ...reasoningPresets.standard })}>
+      <Select className={styles.input} aria-label={prefix} value={mode} onChange={event => update(event.target.value === 'inherit' ? undefined : event.target.value === 'disabled' ? false : { ...reasoningPresets.standard })}>
         <option value="inherit">继承模型默认能力</option>
         <option value="disabled">非推理模型</option>
         <option value="custom">自定义档位与协议值</option>
-      </select>
+      </Select>
       <p className={styles.advancedHint}>每个模型单独配置；仅启用接口支持的档位。继承会移除本模型的覆盖配置。</p>
       {mode === 'custom' && <>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4 }}>

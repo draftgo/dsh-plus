@@ -7,6 +7,55 @@ import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { mountLink } from '../src/index.mjs';
 
+test('device launch supports local and Desktop owners but reports the cloud carrier limit', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'link-device-entry-'));
+  const routes = [];
+  const ctx = { get: () => undefined, workspaceRegistry: { list: () => [] }, connection: { fetch: { register: value => { routes.push(value); return () => {}; } } }, effect: fn => fn() };
+  const link = await mountLink(ctx, { directory });
+  t.after(async () => { await link.close(); await rm(directory, { recursive: true, force: true }); });
+  const route = routes.find(value => value.path === '/api/commander-devices');
+  const launch = (origin, parentOrigin = origin) => route.fetch(new Request(origin + route.path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'launch', parentOrigin }) }));
+  const unsupported = await launch('https://cloud.example');
+  assert.equal(unsupported.status, 409);
+  assert.equal(unsupported.headers.get('cache-control'), 'no-store');
+  const denied = await unsupported.json();
+  assert.equal(denied.code, 'CLOUD_DEVICE_GATEWAY_REQUIRED');
+  assert.equal(denied.url, undefined);
+  assert.match(denied.error, /本机小角/);
+  assert.equal((await launch('https://cloud.example', 'http://127.0.0.1:8080')).status, 409, 'browser-supplied parent does not disguise the cloud origin');
+  assert.equal((await launch('https://cloud.example', 'dsh-app://app')).status, 409, 'a Desktop label cannot disguise the cloud carrier');
+  for (const [origin, parent] of [['http://127.0.0.1:8080', undefined], ['http://localhost:8080', undefined], ['http://[::1]:8080', undefined], ['http://127.0.0.1:8080', 'dsh-app://app'], ['http://127.0.0.1:8080', 'dsh-app://localhost']]) {
+    const response = await launch(origin, parent);
+    assert.equal(response.status, 200);
+    const target = new URL((await response.json()).url);
+    assert.equal(target.hostname, '127.0.0.1');
+    assert.equal(target.pathname, '/enter');
+    const entry = await fetch(target, { redirect: 'manual' });
+    assert.equal(entry.status, 303);
+    assert.equal((await fetch(target, { redirect: 'manual' })).status, 401);
+  }
+  for (const [headers, parentOrigin, expected] of [
+    [{ host: '127.0.0.1:8080', origin: 'http://127.0.0.1:8080' }, 'http://127.0.0.1:8080', 200],
+    [{ host: '127.0.0.1:8080' }, 'dsh-app://app', 200],
+    [{ host: 'cloud.example', origin: 'https://cloud.example' }, 'http://localhost:8080', 409],
+    [{ host: '127.0.0.1:8080', origin: 'https://cloud.example' }, 'dsh-app://app', 409],
+  ]) {
+    const response = await route.fetch(new Request('http://dsh.internal' + route.path, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'launch', parentOrigin }) }));
+    assert.equal(response.status, expected, 'official bridge synthetic URL uses admitted browser Origin or carrier Host');
+    if (response.ok) {
+      const entry = await fetch((await response.json()).url, { redirect: 'manual' });
+      const base = new URL(entry.headers.get('location'), 'http://127.0.0.1');
+      const centerUrl = new URL(entry.url);
+      const config = await (await fetch(centerUrl.origin + base.pathname + 'device-config.js')).text();
+      assert(config.includes(JSON.stringify(parentOrigin)), 'the center trusts the actual parent, never dsh.internal');
+      const api = action => fetch(centerUrl.origin + base.pathname + 'api/devices', { method: 'POST', headers: { origin: centerUrl.origin, 'content-type': 'application/json' }, body: JSON.stringify({ action }) });
+      assert.equal((await (await api('list')).json()).capabilities.hostAdmin, true);
+      assert.equal((await (await api('hostStatus')).json()).enabled, false);
+
+    }
+  }
+});
+
 test('plugin admin persists settings, advertises real TLS and separates public pairing trust', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'link-admin-'));
   let route;

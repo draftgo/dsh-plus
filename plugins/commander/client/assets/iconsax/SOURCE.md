@@ -10,3 +10,5 @@ Link controls additionally use Scan (scan), Refresh (refresh), Copy (copy)
 and CloseCircle (close) from the same iconsax-react 0.0.8 release.
 No runtime package dependency or CDN requests. catalog.json is the same asset content used for bundling.
 Brand marks for Codex, Claude, Pi and OpenCode are kept distinct from interface icons.
+
+Device symbols: Monitor (computer), Mobile, Driver (server), Devices; same iconsax-react 0.0.8 source and MIT license.

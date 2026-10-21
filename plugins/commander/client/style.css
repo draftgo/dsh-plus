@@ -306,7 +306,11 @@ html[data-windows-titlebar]:has(.cmd-shell-sidebar .cmd-projects) {
   .cmd-recents, .cmd-session-actions button { animation: none !important; transition: none !important; }
 }
 
-.cmd-settings-row { display: flex; align-items: center; justify-content: flex-start; gap: 4px; width: 100%; min-width: 0; }
+.cmd-sidebar-footer { flex-direction: column; align-items: stretch; gap: 6px; }
+.cmd-sidebar-status { display: flex; flex-direction: column; align-items: flex-start; width: 100%; min-width: 0; }
+.cmd-sidebar-status:empty { display: none; }
+.cmd-sidebar-status > button { max-width: 100%; min-height: 28px; height: auto; grid-template-columns: 14px minmax(0, 1fr); padding-block: 5px; white-space: normal; overflow-wrap: anywhere; }
+.cmd-settings-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 4px; width: 100%; min-width: 0; }
 .cmd-archive-launcher { display: flex; flex: none; align-items: center; justify-content: center; width: 36px; height: 36px; border: 0; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; }
 .cmd-archive-launcher:hover, .cmd-archive-launcher[aria-pressed=true] { background: var(--dsw-alias-interactive-bg-hover, #88888812); }
 .cmd-archive-launcher:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, #888); outline-offset: -2px; }

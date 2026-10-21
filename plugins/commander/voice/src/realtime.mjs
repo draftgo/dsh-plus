@@ -22,7 +22,7 @@ export function realtimeEndpoint(config) {
   return endpoint;
 }
 
-/** One owner event stream and ordered PCM posts share a native ASR session. */
+/** One authenticated media socket owns each native ASR session. */
 export class RealtimeASR {
   constructor({ socket = (url, options) => new WebSocket(url, options) } = {}) { this.socket = socket; this.sessions = new Map(); }
   async connect(s) {
@@ -112,7 +112,9 @@ export class RealtimeASR {
     if (!Number.isSafeInteger(utteranceId) || utteranceId < 1) throw new VoiceError('Invalid utterance');
     if (!bytes.length || bytes.length % 2 || bytes.length > 24000) throw new VoiceError('Expected 1–12000 PCM16 samples');
     if (s.committing || s.bytes && s.utterance !== utteranceId) throw new VoiceError('Previous utterance has not completed', 409);
-    if (s.ws.bufferedAmount > 96000 || s.bytes + bytes.length > 1440000) throw new VoiceError('Realtime ASR audio limit exceeded', 429);
+    if (s.bytes + bytes.length > 1440000) throw new VoiceError('Realtime ASR audio limit exceeded', 429);
+    // Congestion drops a frame instead of growing stale upstream audio.
+    if (s.ws.bufferedAmount > 12800) return false;
     s.utterance = utteranceId; s.bytes += bytes.length; s.ws.send(JSON.stringify({ event_id: randomUUID(), type: 'input_audio_buffer.append', audio: Buffer.from(bytes).toString('base64') }));
   }
   commit(id, callId, utteranceId) { const s = this.get(id, callId); if (!s.ready || s.utterance !== utteranceId || !s.bytes || s.committing) throw new VoiceError('No pending ASR utterance', 409); s.committing = true; s.ws.send(JSON.stringify({ event_id: randomUUID(), type: 'input_audio_buffer.commit' })); }

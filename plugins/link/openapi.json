@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "DSH-Plus 本机设备中心",
+    "title": "DSH-Plus 设备中心",
     "version": "1.0.0",
     "description": "本机 owner 使用 launch 一次性入口获取私有会话路径。设备 token、SSH 密码和私钥不在公开响应暴露。MCP delegation 不变，不开放 Agent 设备切换或 SSH 工具。"
   },
@@ -48,7 +48,7 @@
             "description": "来源未授权"
           }
         },
-        "description": "请求 Origin 必须等于设备中心源。sshProbe 不发送认证，sshConnect 必须包含用户确认的原始 SHA256 fingerprint。select 返回一次性工作台 URL。移除只删除本机连接，不卸载服务器。 Android 原生还支持 closeWorkbench 关闭本机页面；Node 由前端关闭 iframe。Android 任务终态为 completed/failed。"
+        "description": "请求 Origin 必须等于设备中心源。sshProbe 不发送认证，sshConnect 必须包含用户确认的原始 SHA256 fingerprint。select 返回一次性工作台 URL。移除只删除本机连接，不卸载服务器。 Android 原生还支持 closeWorkbench 关闭本机页面；Node 由前端关闭 iframe。Android 任务终态为 completed/failed。 list.capabilities.hostAdmin 表示允许管理当前主机连接；hostStatus/hostConfigure/hostPairing/hostConfirm/hostReject/hostRevoke 为受限 owner 调用。配对 uri 接受完整 dshlink://pair 或 HTTPS /link/#code=...。SSH 任务在 TLS 指纹、设备令牌及真实 HTML 工作台验证成功后才注册设备。 hostCloudAccess 仅 owner 设备中心可用，透传 operation/key 管理当前主机云端密钥；云端浏览器直接调用同源 owner 管理接口以续签当前会话。"
       }
     },
     "/api/commander-devices": {
@@ -58,7 +58,7 @@
         }
       ],
       "post": {
-        "summary": "官方 owner 通道：打开本机设备中心",
+        "summary": "官方 owner 通道：打开当前主机设备中心",
         "requestBody": {
           "required": true,
           "content": {
@@ -83,7 +83,7 @@
         },
         "responses": {
           "200": {
-            "description": "操作成功"
+            "description": "返回 {url}：一次性入口；云端为 owner 同源 /devices/"
           },
           "400": {
             "description": "输入错误或操作失败"
@@ -93,6 +93,212 @@
           },
           "403": {
             "description": "来源未授权"
+          },
+          "409": {
+            "description": "云端设备网关未配置或页面源不匹配：CLOUD_DEVICE_GATEWAY_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "code"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "const": "CLOUD_DEVICE_GATEWAY_REQUIRED"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "description": "本机返回隔离环回入口；配置 DSH_LINK_DEVICE_GATEWAY_PORT 与 DSH_LINK_CLOUD_ORIGIN 后，云端 owner 返回同源 /devices/ 入口，沿用 Nginx owner 鉴权。远端工作台通过独立 DSH_LINK_WORKBENCH_ORIGIN 与只允许注册目标的网关转发 HTTP、NDJSON、WebSocket，SSH 同样使用隔离代理。不可放入公开 Link carrier。"
+      }
+    },
+    "/api/commander-link": {
+      "servers": [
+        {
+          "url": "/"
+        }
+      ],
+      "post": {
+        "summary": "Owner Link 管理与云端访问密钥",
+        "description": "仅官方 owner 通道。cloud-access 独立于 Link listener；返回常规状态及 cloudAccess:{configured,enabled,origin,error,ready,readinessError}，从不返回密钥/派生值。精确云 Origin 的启用/轮换响应签发 Secure HttpOnly SameSite=Strict Cookie 保持当前管理会话；本机管理员需单独登录云站。configured 仅表示独立环回鉴权服务已启动；ready 表示最近30秒内服务端经精确HTTPS源、无重定向访问登录路由并验证当前实例随机标识。状态轮询不阻塞，启用/轮换前强制验证；ready不是全站规则扫描结果。配置损坏时保留owner管理接口并拒绝云端鉴权。 云密钥仅保护 owner 入口；按配套反代部署的 /link/ 使用独立设备认证，不重复要求 owner 密钥。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "action",
+                  "operation"
+                ],
+                "properties": {
+                  "action": {
+                    "const": "cloud-access"
+                  },
+                  "operation": {
+                    "enum": [
+                      "enable",
+                      "rotate",
+                      "disable"
+                    ]
+                  },
+                  "key": {
+                    "type": "string",
+                    "minLength": 16,
+                    "maxLength": 512,
+                    "writeOnly": true,
+                    "description": "启用/轮换必填；仅本次请求明文传递，持久化scrypt派生值。"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "状态；启用/轮换同源管理员响应可能包含 Set-Cookie"
+          },
+          "400": {
+            "description": "未配置服务、反代登录入口未就绪、输入无效、配置损坏或服务关闭"
+          },
+          "401": {
+            "description": "需要云端登录或 owner 身份"
+          },
+          "403": {
+            "description": "owner 权限或来源无效"
+          }
+        }
+      }
+    },
+    "/__dsh_access/login": {
+      "servers": [
+        {
+          "url": "/"
+        }
+      ],
+      "get": {
+        "summary": "公开云端访问密钥登录页面",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "next",
+            "schema": {
+              "type": "string"
+            },
+            "description": "仅站内相对路径；非法跳转回首页，浏览器fragment不发送服务端。"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "无缓存、nonce CSP 安全登录页；X-DSH-Cloud-Ready为当前实例内存随机标识，仅供服务端HTTPS反代就绪验证，不是登录凭据"
+          },
+          "403": {
+            "description": "Host不匹配配置HTTPS域名"
+          }
+        }
+      }
+    },
+    "/__dsh_access/session": {
+      "servers": [
+        {
+          "url": "/"
+        }
+      ],
+      "post": {
+        "summary": "验证云端访问密钥并建立会话",
+        "description": "要求精确Origin、application/json、x-dsh-access:1；最多4KiB。全局5次失败暂停一分钟，忽略X-Forwarded-For。登录不替代官方owner和Link配对授权。",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-dsh-access",
+            "required": true,
+            "schema": {
+              "const": "1"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "key"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 16,
+                    "maxLength": 512,
+                    "writeOnly": true
+                  },
+                  "next": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{next}；Set-Cookie __Host-dsh_access，12小时、Secure、HttpOnly、SameSite=Strict"
+          },
+          "401": {
+            "description": "密钥错误"
+          },
+          "403": {
+            "description": "Host/Origin/CSRF头无效"
+          },
+          "413": {
+            "description": "请求超过4KiB"
+          },
+          "429": {
+            "description": "失败限速或并发验证繁忙，Retry-After:60"
+          }
+        }
+      },
+      "delete": {
+        "summary": "注销当前浏览器会话",
+        "description": "同源与CSRF约束同POST，清除会话Cookie。",
+        "responses": {
+          "200": {
+            "description": "{ok:true} 与过期Cookie"
+          },
+          "403": {
+            "description": "来源无效"
+          }
+        }
+      }
+    },
+    "/__dsh_access/check": {
+      "servers": [
+        {
+          "url": "/"
+        }
+      ],
+      "get": {
+        "summary": "仅 Nginx 内部的 owner 鉴权子请求",
+        "description": "必须在Nginx标记internal，公网不得直接访问；服务只监听环回，忽略伪造转发IP。未启用密钥允许204；启用后仅有效随机会话204，否则401。鉴权服务不可达时Nginx应500拒绝访问。",
+        "responses": {
+          "204": {
+            "description": "允许进入后续原有鉴权"
+          },
+          "401": {
+            "description": "云端会话缺失、失效或已轮换"
+          },
+          "403": {
+            "description": "Host不符合配置"
           }
         }
       }
@@ -118,7 +324,14 @@
               "sshConnect",
               "job",
               "reconnect",
-              "serverAction"
+              "serverAction",
+              "hostStatus",
+              "hostConfigure",
+              "hostPairing",
+              "hostConfirm",
+              "hostReject",
+              "hostRevoke",
+              "hostCloudAccess"
             ]
           },
           "deviceId": {
@@ -144,9 +357,10 @@
           },
           "port": {
             "type": "integer",
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 65535,
-            "default": 22
+            "default": 22,
+            "description": "SSH 为 1–65535（默认22）；hostConfigure 为 0–65535，0分配随机端口。"
           },
           "username": {
             "type": "string"
@@ -180,10 +394,58 @@
               "stop",
               "restart",
               "logs",
-              "update"
+              "update",
+              "enable",
+              "rotate",
+              "disable"
             ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "publicUrl": {
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "lan",
+              "public"
+            ]
+          },
+          "address": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string",
+            "writeOnly": true,
+            "minLength": 16,
+            "maxLength": 512
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "enum": [
+                    "sshProbe",
+                    "sshConnect"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "port": {
+                  "minimum": 1
+                }
+              }
+            }
+          }
+        ]
       },
       "Device": {
         "type": "object",

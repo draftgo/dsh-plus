@@ -9,11 +9,11 @@
   font-size: 14px; line-height: 1.5; color-scheme: light; -webkit-tap-highlight-color: transparent;
 }
 .link-mobile-v3, .link-mobile-v3 *, .link-mobile-preview, .link-mobile-preview * { box-sizing: border-box; }
-.link-mobile-v3 :is(button, input, select, textarea) { font: inherit; }
-.link-mobile-v3 :is(input, select, textarea) { font-size: 16px; }
+.link-mobile-v3 :is(button, input, .dowork-select, textarea) { font: inherit; }
+.link-mobile-v3 :is(input, .dowork-select, textarea) { font-size: 16px; }
 .link-mobile-v3 button { touch-action: manipulation; cursor: pointer; }
-.link-mobile-v3 :is(button, input, select, textarea, summary, a):focus-visible { outline: 2px solid var(--link-ink); outline-offset: 3px; }
-.link-mobile-v3 :is(button, input, select, textarea):disabled { cursor: default; opacity: .42; }
+.link-mobile-v3 :is(button, input, .dowork-select, textarea, summary, a):focus-visible { outline: 2px solid var(--link-ink); outline-offset: 3px; }
+.link-mobile-v3 :is(button, input, .dowork-select, textarea):disabled { cursor: default; opacity: .42; }
 .link-mobile-v3 :is(h1, h2, h3, p) { overflow-wrap: anywhere; }
 .link-mobile-v3 h1 { margin: 0; font-size: 29px; line-height: 1.25; font-weight: 650; letter-spacing: -.045em; }
 .link-mobile-v3 h2 { margin: 0; font-size: 15px; line-height: 1.4; font-weight: 600; letter-spacing: -.015em; }
@@ -120,9 +120,9 @@
 .link-new-form { display: grid; gap: 22px; min-width: 0; }
 .link-mobile-field { display: grid; gap: 9px; width: 100%; min-width: 0; margin: 0; }
 .link-mobile-field > span { color: var(--link-muted); font-size: 12px; font-weight: 500; }
-.link-mobile-field :is(input, select, textarea) { display: block; width: 100%; min-width: 0; max-width: 100%; min-height: 47px; margin: 0; padding: 12px; border: 1px solid var(--link-faint); border-radius: 10px; outline: none; color: var(--link-ink); background: var(--link-panel); font-family: inherit; font-size: 16px; line-height: 1.5; }
-.link-mobile-field :is(input, select, textarea):focus { border-color: var(--link-muted); }
-.link-mobile-field select { text-overflow: ellipsis; }
+.link-mobile-field :is(input, .dowork-select, textarea) { display: block; width: 100%; min-width: 0; max-width: 100%; min-height: 47px; margin: 0; padding: 12px; border: 1px solid var(--link-faint); border-radius: 10px; outline: none; color: var(--link-ink); background: var(--link-panel); font-family: inherit; font-size: 16px; line-height: 1.5; }
+.link-mobile-field :is(input, .dowork-select, textarea):focus { border-color: var(--link-muted); }
+.link-mobile-field .dowork-select { text-overflow: ellipsis; }
 .link-mobile-field textarea { min-height: 100px; resize: vertical; overflow-wrap: anywhere; }
 .link-new-form > .link-mobile-footnote { margin: -5px 0 0; }
 .link-new-form > .link-primary-action { justify-self: start; min-width: 133px; }

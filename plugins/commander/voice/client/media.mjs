@@ -16,8 +16,8 @@ export function pcmWav(frames){
 }
 const join=(a,b)=>!a?b:!b?a:a+(/[\p{Script=Han}]$/u.test(a)||/^[\p{Script=Han}，。！？、]/u.test(b)?'':' ')+b;
 export class Capture {
-  constructor({transcribe,realtime,parallel=false,onPartial=()=>{},onFinal=()=>{},onSpeechStart=()=>{},onSpeechEnd=()=>{},onLevel=()=>{},onError=()=>{},silenceMs=400,workletURL='api/voice/worklet'}={}){
-    Object.assign(this,{transcribe,realtime,parallel,onPartial,onFinal,onSpeechStart,onSpeechEnd,onLevel,onError,silenceMs,workletURL});this.levelAt=0;this.generation=0;this.active=false;this.pending=Promise.resolve();this.controllers=new Set();this.pre=[];this.noise=.001;this.muted=false;this.playbackActive=false;this.echoUntil=0;this.attack=0;this.backlog=0;this.segment=null;this.stopping=null;this.utteranceId=0;this.finals=new Set();this.queuedSamples=0;this.tasks=new Set();this.finalChain=Promise.resolve();this.asrActive=0;this.asrWaiters=[];
+  constructor({transcribe,realtime,parallel=false,onPartial=()=>{},onFinal=()=>{},onSpeechStart=()=>{},onSpeechEnd=()=>{},onLevel=()=>{},onError=()=>{},silenceMs=320,workletURL='api/voice/worklet'}={}){
+    Object.assign(this,{transcribe,realtime,parallel,onPartial,onFinal,onSpeechStart,onSpeechEnd,onLevel,onError,silenceMs,workletURL});this.levelAt=0;this.generation=0;this.active=false;this.pending=Promise.resolve();this.controllers=new Set();this.pre=[];this.noise=.001;this.muted=false;this.playbackActive=false;this.echoUntil=0;this.attack=0;this.backlog=0;this.segment=null;this.stopping=null;this.utteranceId=0;this.finals=new Set();this.tasks=new Set();this.finalChain=Promise.resolve();this.asrActive=0;this.asrWaiters=[];
   }
   async start(){
     if(this.active)return;if(this.stopping)await this.stopping;if(microphoneOwner&&microphoneOwner!==this)throw Error('麦克风已被另一个语音入口使用');
@@ -32,7 +32,7 @@ export class Capture {
       this.node.port.postMessage({type:'mute',value:this.muted,epoch:this.generation});for(const track of stream.getAudioTracks?.()||[])track.enabled=!this.muted;this.source=this.context.createMediaStreamSource(stream);this.source.connect(this.node);this.node.connect(this.context.destination);await this.context.resume();
     }catch(e){if(generation===this.generation){this.active=false;await this.release();}throw e;}
   }
-  setPlaybackActive(value){this.playbackActive=!!value;if(!value)this.echoUntil=Date.now()+350;}
+  setPlaybackActive(value){this.playbackActive=!!value;if(!value)this.echoUntil=Date.now()+220;}
   setMuted(value){
     if(this.muted===!!value)return;this.muted=!!value;if(this.muted)this.generation++;for(const track of this.stream?.getAudioTracks?.()||[])track.enabled=!this.muted;this.node?.port.postMessage({type:'mute',value:this.muted,epoch:this.generation});
     if(this.muted){const id=this.segment?.id;this.segment=null;this.pre=[];this.attack=0;for(const c of this.controllers)c.abort();void this.realtime?.clear?.().catch(error=>this.onError(error));this.onLevel(0);if(id)this.onSpeechEnd(id,{cancelled:true});}
@@ -45,23 +45,29 @@ export class Capture {
     if(!this.segment){
       this.pre.push(frame);while(this.pre.reduce((n,f)=>n+f.length,0)>RATE*.22)this.pre.shift();
       this.attack=voice?this.attack+ms:0;if(!voice&&!protectedAudio)this.noise=this.noise*(rms<this.noise?.9:.995)+rms*(rms<this.noise?.1:.005);
-      if(this.attack<(protectedAudio?260:120))return;
+      if(this.attack<(protectedAudio?200:100))return;
       this.segment={frames:this.pre.splice(0),samples:0,total:0,silence:0,text:'',generation:this.generation,id:++this.utteranceId};
       this.segment.samples=this.segment.frames.reduce((n,f)=>n+f.length,0);this.attack=0;this.onSpeechStart(this.segment.id);
     }else{this.segment.frames.push(frame);this.segment.samples+=frame.length;}
     const s=this.segment;s.total+=ms;s.silence=voice?0:s.silence+ms;
-    if(s.silence>=this.silenceMs||s.total>=15000)this.commit();else if(s.samples>=RATE*(this.realtime?.1:HTTP_CHUNK_SECONDS))this.submit(s);
+    if(s.silence>=this.silenceMs||s.total>=15000)this.commit();else if(this.realtime||s.samples>=RATE*HTTP_CHUNK_SECONDS)this.submit(s);
   }
   submit(s){
     if(!s.frames.length)return;
-    if(this.realtime?this.queuedSamples+s.samples>RATE*6:this.backlog>=6){s.frames=[];s.samples=0;this.onError(Error('语音识别处理过慢，已丢弃超限音频'));return;}
-    const frames=s.frames,blob=this.realtime?null:pcmWav(frames);s.frames=[];s.samples=0;this.backlog++;const queuedSamples=frames.reduce((n,f)=>n+f.length,0);this.queuedSamples+=queuedSamples;s.parts??=[];const part={text:'',done:false};s.parts.push(part);
+    if(this.realtime){
+      // The recognizer owns a bounded socket queue. Microphone frames must not
+      // wait behind an earlier utterance's network round trip or final text.
+      const frames=s.frames;s.frames=[];s.samples=0;
+      try{Promise.resolve(this.realtime.append(frames,s.id,text=>{if(s.generation===this.generation&&s.id===this.utteranceId){s.text=text;this.onPartial(text,{utteranceId:s.id});}})).catch(error=>{if(error.name!=='AbortError'&&s.generation===this.generation)this.onError(error);});}catch(error){if(error.name!=='AbortError'&&s.generation===this.generation)this.onError(error);}
+      return;
+    }
+    if(this.backlog>=6){s.frames=[];s.samples=0;this.onError(Error('语音识别处理过慢，已丢弃超限音频'));return;}
+    const blob=pcmWav(s.frames);s.frames=[];s.samples=0;this.backlog++;s.parts??=[];const part={text:'',done:false};s.parts.push(part);
     const run=async()=>{
       if(s.generation!==this.generation)return;
       const controller=new AbortController();this.controllers.add(controller);let timer;
       try{
-        if(this.realtime){await this.realtime.append(frames,s.id,text=>{if(s.generation===this.generation){s.text=text;this.onPartial(text,{utteranceId:s.id});}});return;}
-        if(this.parallel){while(this.asrActive>=2)await new Promise(resolve=>this.asrWaiters.push(resolve));this.asrActive++;}
+        if(this.parallel){while(this.asrActive>=2)await new Promise(resolve=>this.asrWaiters.push(resolve));if(s.generation!==this.generation){this.asrWaiters.shift()?.();return;}this.asrActive++;}
         try{
           const result=await Promise.race([Promise.resolve().then(()=>this.transcribe(blob,controller.signal,text=>{if(s.generation===this.generation){part.text=text;this.publishPartials(s,part);}})),new Promise((_,reject)=>{timer=setTimeout(()=>{reject(Error('语音识别超时'));controller.abort();},25000);controller.signal.addEventListener('abort',()=>reject(abortError()),{once:true});})]);
           if(s.generation!==this.generation)return;part.text=(typeof result==='string'?result:result?.text||'').trim();
@@ -69,16 +75,21 @@ export class Capture {
       }catch(e){if(e.name!=='AbortError'&&s.generation===this.generation)this.onError(e);}
       finally{clearTimeout(timer);this.controllers.delete(controller);}
     };
-    const task=((this.realtime||!this.parallel)?this.pending.then(run):Promise.resolve().then(run)).finally(()=>{this.backlog--;this.queuedSamples=Math.max(0,this.queuedSamples-queuedSamples);});
-    this.tasks.add(task);task.then(()=>this.tasks.delete(task),()=>this.tasks.delete(task));s.tasks??=[];s.tasks.push(task);this.pending=(this.realtime||!this.parallel)?task:Promise.all([...this.tasks]);
+    const task=(!this.parallel?this.pending.then(run):Promise.resolve().then(run)).finally(()=>{this.backlog--;});
+    this.track(s,task);this.pending=!this.parallel?task:Promise.all([...this.tasks]);
   }
+  track(s,task){this.tasks.add(task);task.then(()=>this.tasks.delete(task),()=>this.tasks.delete(task));s.tasks??=[];s.tasks.push(task);}
   publishPartials(s,part){
     if(s.generation!==this.generation)return;
     let text='',previousDone=true;for(const current of s.parts){if(!previousDone)break;if(current.text)text=join(text,current.text);previousDone=current.done;}
     if(text&&text!==s.text){s.text=text;this.onPartial(text,{utteranceId:s.id});}
   }
   commit(){const s=this.segment;if(!s)return Promise.resolve('');this.segment=null;this.pre=[];this.onSpeechEnd(s.id,{cancelled:false});this.submit(s);
-    const final=this.finalChain.then(async()=>{await Promise.all(s.tasks||[]);if(this.realtime&&s.generation===this.generation)s.text=await this.realtime.commit(s.id);if(s.generation===this.generation){if(s.text)this.lastFinal=s.text;this.onFinal(s.text,{utteranceId:s.id,final:true});return s.text;}return '';});this.finalChain=final.catch(()=>{});const settled=final.then(()=>{},error=>{if(s.generation===this.generation&&error.name!=='AbortError')this.onError(error);}).finally(()=>this.finals.delete(settled));this.finals.add(settled);this.pending=Promise.all([...this.tasks,this.finalChain]);return final;
+    // Queue the commit barrier immediately, before the next utterance's frames.
+    // Only publication of final text is serialized, never microphone capture.
+    let result;try{result=this.realtime&&s.generation===this.generation?Promise.resolve(this.realtime.commit(s.id)):null;}catch(error){result=Promise.reject(error);}
+    result?.catch(()=>{});
+    const final=this.finalChain.then(async()=>{await Promise.all(s.tasks||[]);if(result)s.text=await result;if(s.generation===this.generation){if(s.text)this.lastFinal=s.text;this.onFinal(s.text,{utteranceId:s.id,final:true});return s.text;}return '';});this.finalChain=final.catch(()=>{});const settled=final.then(()=>{},error=>{if(s.generation===this.generation&&error.name!=='AbortError')this.onError(error);}).finally(()=>this.finals.delete(settled));this.finals.add(settled);this.pending=Promise.all([...this.tasks,this.finalChain]);return final;
   }
   async release(){
     this.node?.disconnect();this.source?.disconnect();if(this.node)this.node.port.onmessage=null;this.stream?.getTracks().forEach(t=>t.stop());
@@ -98,7 +109,7 @@ export class PCMPlayer {
   async start(){
     if(this.starting)return this.starting;if(this.context?.state==='running'&&this.node)return;
     this.starting=(async()=>{const Audio=globalThis.AudioContext||globalThis.webkitAudioContext;if(!Audio)throw Error('此浏览器不支持 Web Audio');
-      if(!this.context){this.context=new Audio();try{await this.context.audioWorklet.addModule(String(this.workletURL));this.node=new AudioWorkletNode(this.context,'voice-playback',{numberOfInputs:0,numberOfOutputs:1,outputChannelCount:[1]});this.node.port.onmessage=({data:m})=>{if(m.epoch!==this.epoch)return;if(m.type==='consumed'){this.queued=Math.max(0,this.queued-m.count);this.wake();}else if(m.type==='played')this.onPlayed(m.id);else if(m.type==='playing')this.onPlaybackStart({id:m.id,epoch:this.epoch});else if(m.type==='idle'||m.type==='buffering')this.onPlaybackIdle();else if(m.type==='error')this.onError(Error(m.error));if(m.type==='level')this.onMetrics({bufferedSeconds:this.queued/RATE,level:m.level});};this.node.connect(this.context.destination);this.node.port.postMessage({type:'clear',epoch:this.epoch});}catch(e){await this.context.close().catch(()=>{});this.context=null;throw e;}}
+      if(!this.context){this.context=new Audio();try{await this.context.audioWorklet.addModule(String(this.workletURL));this.node=new AudioWorkletNode(this.context,'voice-playback',{numberOfInputs:0,numberOfOutputs:1,outputChannelCount:[1]});this.node.port.onmessage=({data:m})=>{if(m.epoch!==this.epoch)return;if(m.type==='consumed'){this.queued=Math.max(0,this.queued-m.count);this.wake();}else if(m.type==='played')this.onPlayed(m.id);else if(m.type==='playing')this.onPlaybackStart({id:m.id,epoch:this.epoch});else if(m.type==='idle')this.onPlaybackIdle();else if(m.type==='error')this.onError(Error(m.error));if(m.type==='level')this.onMetrics({bufferedSeconds:this.queued/RATE,level:m.level});};this.node.connect(this.context.destination);this.node.port.postMessage({type:'clear',epoch:this.epoch});}catch(e){await this.context.close().catch(()=>{});this.context=null;throw e;}}
       await this.context.resume();})().finally(()=>this.starting=null);return this.starting;
   }
   wake(){for(const done of this.waiters.splice(0))done();}

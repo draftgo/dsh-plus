@@ -22,3 +22,12 @@ for(const [pkg,file]of [['ui-settings-general','SettingsRoot.tsx'],['ui-sidebar'
 test('locale adapter preserves existing bound translators and forwards all other keys',async()=>{
   const {transformSync}=await import('esbuild'),{runInNewContext}=await import('node:vm');const source=await readFile(new URL('../client/shell-ui.jsx',import.meta.url),'utf8');const code=transformSync(source,{loader:'jsx',format:'cjs'}).code,module={exports:{}};runInNewContext(code,{module,exports:module.exports,require:()=>({}),Error});const locale={getLocale:()=>({active:'zh'}),translate:(ns,key)=>ns+':'+key},oldBound=key=>locale.translate('workspace',key);locale.translate=module.exports.recentTranslation(locale,locale.translate);assert.equal(oldBound('workspace.defaultName'),'最近');assert.equal(oldBound('other'),'workspace:other');
 });
+test('native desktop update and reconnect actions share a separate status seat above the Plus footer',async()=>{
+  const path=fileURLToPath(new URL('../../../deepseek-harness/packages/client/ui-settings-general/src/client/SettingsRoot.tsx',import.meta.url));
+  const result=await handlers.find(handler=>handler.filter.test(path)).callback({path});
+  assert.match(result.contents,/clsx\(css.triggerRow, !wide && css.railRow, 'cmd-sidebar-footer'\)/);
+  assert.match(result.contents,/<div className="cmd-sidebar-status">\s*<ConnectionIndicator[\s\S]*?<DesktopUpdateIndicator[\s\S]*?onOpen=\{openDesktopUpdate\} \/>\s*<\/div>/);
+  const css=await readFile(new URL('../client/style.css',import.meta.url),'utf8');
+  assert(result.contents.indexOf('className="cmd-sidebar-status"') < result.contents.indexOf("{renderSlot('settings.launcher'"), 'keyboard order follows visual order');
+  assert.match(css,/\.cmd-sidebar-status:empty\s*\{ display: none/);
+});

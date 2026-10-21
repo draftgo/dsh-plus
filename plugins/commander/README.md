@@ -214,7 +214,7 @@ OpenCode **仅适配 v1**，主动拒绝 v2；需要安装现有 CLI，插件不
 | Pi | `pi --mode rpc` | 双向 JSONL、原生会话文件、扩展工具与问题 |
 | OpenCode | 本地服务及匹配版本的 SDK/HTTP/事件流 | 原生 session、服务生命周期、版本能力差异 |
 
-上表来自 [Paseo 源码分析](../../Design/paseo-agent-drivers.md)，不是本插件已验证的兼容列表。实现时逐一固定并验证版本。
+上表来自历史 Paseo 源码分析，不是本插件已验证的兼容列表。实现时逐一固定并验证版本。
 
 ## 状态和控制权
 
@@ -254,4 +254,4 @@ Harness 仍持有宿主会话与权限体系；DSH-Plus 持有外部执行资源
 
 Codex 等 npm 工具点击安装后自动准备缺少或不兼容的 Node.js/npm，默认国内加速，可切换官方直连。环境安装在 DSH-Plus 用户目录，无需管理员权限，不修改系统 PATH 或用户 npm 配置。安装、更新、重装均显示环境准备与版本验证进度；托管环境在重启后继续复用。Hermes 的 uv/Git 与 Claude Desktop 仍按各自支持边界处理。接口契约见 `openapi.json`。
 
-新增 Gemini CLI、Hermes、Grok Build、MiniMax Code 的 ACP 接管；Claude Desktop 和 OpenClaw 当前支持配置管理，不提供会话接管。Desktop 自动安装、代理转换/故障转移、MCP/Skills/Prompts 同步及 CC Switch 数据迁移仍待实现。详细矩阵见根目录 Design/CCSwitch替代实现进度.md，适配器契约见 TOOL-CONFIG.md。
+新增 Gemini CLI、Hermes、Grok Build、MiniMax Code 的 ACP 接管；Claude Desktop 和 OpenClaw 当前支持配置管理，不提供会话接管。Desktop 自动安装、代理转换/故障转移、MCP/Skills/Prompts 同步及 CC Switch 数据迁移仍待实现。适配器契约见 TOOL-CONFIG.md。

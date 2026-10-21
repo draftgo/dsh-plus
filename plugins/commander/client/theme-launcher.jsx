@@ -14,7 +14,7 @@ export function ThemeLauncher({ theme }) {
   const dark = snapshot.active.colorScheme === 'dark';
   const label = dark ? '切换到浅色模式' : '切换到深色模式';
   const Icon = dark ? IconLightOutlineMedium : IconDarkOutlineMedium;
-  return <Tooltip label={label} delayMs={450} portal>
+  return <Tooltip label={label} side="top" gap={10} delayMs={450} portal>
     <button type="button" className="cmd-archive-launcher cmd-theme-launcher" aria-label={label}
       onClick={() => theme.setTheme(theme.getSnapshot().active.colorScheme === 'dark' ? 'light' : 'dark')}>
       <Icon size={16} />

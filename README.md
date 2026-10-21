@@ -22,7 +22,9 @@ dsh plugin --profile desktop add ./plugins/commander
 
 公网：配置自己可达的 HTTPS 根地址，按 [Nginx 示例](plugins/link/config/nginx.example.conf) 反代 `/link/`；Android App 或手机/电脑浏览器配对后接入。公网模式不会自动打通家中 NAT；iPhone 首版使用公网网页。
 
-下载正式安装包见 [Releases](https://github.com/draftgo/dsh-plus/releases)。完整 Windows EXE 内置官方 DSH、Plus、Voice 与 Link，安装后无需再装插件；已通过 Windows CI 构建和静默安装。Android 使用独立持久发行签名；旧 debug 验收包首次切换需卸载后安装正式版，后续正式版可覆盖升级；没有 iOS 原生包。人工桌面、手机真机与蜂窝网络验收边界见 [实现记录](Design/Link入口与移动端实现记录.md)。
+云端工作区可在“设置 → 远程连接 → 云端访问密钥”启用全站密钥，需先按 [部署说明](plugins/link/README.md#云端访问密钥) 接入鉴权服务及全站 Nginx 配置。保护 owner 主页、API、流与资源；Link 配对工作台使用独立设备认证，须同步配套反代配置。设置状态不代表反向代理已接入。
+
+下载正式安装包见 [Releases](https://github.com/draftgo/dsh-plus/releases)。完整 Windows EXE 内置官方 DSH、Plus、Voice 与 Link，安装后无需再装插件；已通过 Windows CI 构建和静默安装。Android 使用独立持久发行签名；旧 debug 验收包首次切换需卸载后安装正式版，后续正式版可覆盖升级；没有 iOS 原生包。人工桌面、手机真机与蜂窝网络验收边界见 [实现记录](Design/01-设备与远程连接/设计.md)。
 
 ## 项目结构
 
@@ -78,10 +80,10 @@ npm run build:android
 - Android 一次保存一台主机，支持清除重配；任务留在主机运行，前台短轮询恢复状态。
 - 不含桌面投屏、远程终端/文件编辑、公共中继、穿透、iOS 原生包或后台保活承诺。
 
-详细说明：[DSH-Plus](plugins/commander/README.md) · [Link](plugins/link/README.md) · [移动端](plugins/link/mobile/README.md) · [实现与测试](Design/Link入口与移动端实现记录.md)。
+详细说明：[DSH-Plus](plugins/commander/README.md) · [Link](plugins/link/README.md) · [移动端](plugins/link/mobile/README.md) · [实现与测试](Design/01-设备与远程连接/设计.md)。
 
 ## 许可
 
 项目遵循 [MIT](LICENSE)。官方引擎及第三方资产遵循各自许可证；图标、字体与内联依赖说明见 [NOTICE](plugins/commander/NOTICE)。字体不属于本项目 MIT 许可。`reference/` 的仓库不是产品依赖，Link 未复制 Remote 源码。
 
-更新方式、首次 Windows 迁移与签名发布流程见 [更新与发布](Design/更新与发布.md)。
+更新方式、首次 Windows 迁移与签名发布流程见 [更新与发布](Design/05-更新与发布/发布.md)。

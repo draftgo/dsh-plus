@@ -93,12 +93,41 @@ export function nativeDeviceCall(action, args = {}) {
 async function jsonPost(url, body, signal, token) {
   const response = await fetch(url, { method: 'POST', credentials: 'same-origin', signal,
     headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) });
-  const value = await response.json().catch(() => ({}));
-  if (!response.ok || value.error) throw new Error(value.error || `连接服务返回 HTTP ${response.status}`);
+  let value;
+  try { value = await response.json(); } catch (cause) {
+    if (response.ok) {
+      const error = new Error('接口返回格式异常', { cause });
+      error.status = response.status; throw error;
+    }
+    value = {};
+  }
+  if (response.ok && (!value || typeof value !== 'object' || Array.isArray(value))) {
+    const error = new Error('接口返回格式异常');
+    error.status = response.status; throw error;
+  }
+  if (!response.ok || value?.error) {
+    const error = new Error(value?.error || `连接服务返回 HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
   return value;
 }
-export function managementCall(action, args = {}, signal) {
-  return jsonPost(new URL('api/commander-link', document.baseURI), { action, ...args }, signal);
+export async function managementCall(action, args = {}, signal) {
+  const url = new URL('api/commander-link', document.baseURI);
+  const timeout = AbortSignal.timeout(10_000);
+  try {
+    const value = await jsonPost(url, { action, ...args }, signal ? AbortSignal.any([signal, timeout]) : timeout);
+    if (action !== 'pairing' && typeof value.enabled !== 'boolean') throw new Error('接口返回状态不完整');
+    return value;
+  } catch (reason) {
+    if (signal?.aborted) throw reason;
+    const missing = reason.status === 404;
+    const timedOut = timeout.aborted;
+    const error = new Error(missing ? '服务待就绪，请稍后重试' : timedOut ? '连接超时，请重试' : '暂时无法连接，请重试', { cause: reason });
+    error.detail = `${reason.message} · ${url.pathname}`;
+    error.status = reason.status;
+    throw error;
+  }
 }
 export function call(action, args = {}, signal) {
   const path = action === 'pair' ? '/link/api/pair' : action === 'pair/status' ? '/link/api/pair/status' : '/link/api/rpc';

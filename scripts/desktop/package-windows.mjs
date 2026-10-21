@@ -22,6 +22,7 @@ function run(args, cwd = engine) {
 }
 const pm = (args, cwd) => run([pnpm, ...args], cwd);
 await pm(['run', 'build:official']);
+await run([join(root, 'scripts/desktop/prepare-tray.mjs')], root);
 await pm(['run', 'release:pack', '--family', 'dsh', '--out', join(target, 'packed/dsh')]);
 await pm(['--dir', 'apps/desktop-host', 'pack', '--pack-destination', join(target, 'packed/dsh')]);
 await pm(['run', 'release:pack', '--family', 'vendor', '--out', join(target, 'packed/vendor')]);

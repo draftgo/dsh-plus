@@ -25,3 +25,12 @@
 - Chromium 假麦克风 + 浏览器拦截的转录 fixture：输入栏麦克风启动、停止、AudioWorklet 加载及转录文字回填原生草稿成功，无页面错误。fixture 仅在该浏览器上下文生效，未保存测试供应商配置、未发真实模型请求、未创建聊天消息。
 
 未验证：真实供应商、真实麦克风/扬声器及移动设备，长通话外放回声、弱网和服务端进程退出的工具取消。持续 sinc 重采样、自适应起播缓冲已实现；尚未迁移 TEN VAD、RNNoise 和完整生产延迟指标。ASR 当前为分段实时 HTTP 转录；TTS 要求原始 PCM16LE 24k 单声道流。
+
+## 2026-10-20 低延迟媒体调度
+
+- 二进制持续上行替代实时路径的逐包 HTTP/NDJSON；20 ms 采集、600 ms 有界待发、12 帧 ACK 窗口、拥塞丢旧/过期音频并反馈，保留供应商 PCM 协议与显式模型选择。
+- Web/Desktop 复用官方 owner upgrade 鉴权；Link 工作台与设备本地代理增加配对认证通道，连接 ticket 一次性且 10 秒有效，撤销设备/租约/配置关闭媒体。部署样例增加精确 WS 升级路由。
+- 停说/插话/起播参数、首分句流式合成、取消释放与旧路径删除见 STREAMING.md；没有引入 Opus、TEN VAD、RNNoise，也未将参考项目文档当作已实现能力。
+- 本地真实 WebSocket fixture 验证二进制 PCM → 上游 append/commit → final、clear 重连 epoch、ticket 重放/错误租约拒绝、租约关闭；浏览器模拟验证延迟 ACK、队列淘汰/过期、跨语段屏障、拥塞警告、重复静音和未响应连接释放。未调用真实供应商、未启动图形应用，未验证真机麦克风、外放与弱网长通话。
+- 最终自动回归：`npm run test:voice` 136/136；Link workbench/devices/transport 18/18。新增完整客户端 → 真实媒体 WebSocket → 模拟供应商 → final，以及真实 Cordis 兄弟 scope 的 Link 接入测试；Link 使用显式 `ctx.get('voice')` 获取可用服务，避免未注入属性在实际运行时抛错。挂断先于 start 响应的迟到租约也已验证释放。
+- `npm --prefix plugins/commander run build:client` 通过，已同步客户端、Link 服务与服务器 seed；本次范围 `git diff --check` 通过。`npm run check` 确认官方子模块干净、入口一致，仅属结构检查。未修改或重载线上代理，未重启用户服务。

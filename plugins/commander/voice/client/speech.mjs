@@ -15,9 +15,11 @@ export class SpeakableChunker {
   consume(final,drain=false){
     const out=[];
     const emit=()=>{const safe=speakable(this.text);this.text='';if(safe){out.push(safe);this.emitted++;this.startedAt=this.now();}};
-    const append=value=>{for(const ch of value){this.text+=ch;if(/[。！？；!?\n]/u.test(ch)||ch==='.'&&(!this.raw[0]||/\s/.test(this.raw[0])))emit();else if(this.text.length>=this.maxChars){const boundary=Math.max(this.text.lastIndexOf(' '),this.text.lastIndexOf('，'),this.text.lastIndexOf(','));if(boundary>=this.maxChars*.4){const tail=this.text.slice(boundary+1);this.text=this.text.slice(0,boundary+1);emit();this.text=tail;}else if(/[\p{Script=Han}]/u.test(ch))emit();else if(this.text.length>this.maxChars+100){this.text='[过长标识已略过]';emit();this.discardToken=true;}}}};
+    const append=value=>{for(const ch of value){this.text+=ch;if(/[。！？；!?\n]/u.test(ch)||ch==='.'&&(!this.raw[0]||/\s/.test(this.raw[0])))emit();else if(!this.emitted&&!this.inline&&/[，,]/u.test(ch)&&!/[0-9]/.test(this.text.at(-2)||'')&&this.text.trim().length>=(/[\p{Script=Han}]/u.test(this.text)?10:32))emit();else if(this.text.length>=this.maxChars){const boundary=Math.max(this.text.lastIndexOf(' '),this.text.lastIndexOf('，'),this.text.lastIndexOf(','));if(boundary>=this.maxChars*.4){const tail=this.text.slice(boundary+1);this.text=this.text.slice(0,boundary+1);emit();this.text=tail;}else if(/[\p{Script=Han}]/u.test(ch))emit();else if(this.text.length>this.maxChars+100){this.text='[过长标识已略过]';emit();this.discardToken=true;}}}};
     const hint=kind=>{if(this.hints.has(kind))return;this.hints.add(kind);if(this.text.trim())append(' ');append(HINTS[kind]);};
-    while(this.raw.length&&(final||drain||this.raw.length>8)){
+    // Emit confirmed sentence and first-clause boundaries without an idle delay.
+    // The parser still retains incomplete markup and URL prefixes.
+    while(this.raw.length&&(final||drain||this.raw.length>8||/[。！？；!?\n]/u.test(this.raw)||!this.emitted&&/[，,]/u.test(this.raw))){
       if(this.hidden){const close='</'+this.hidden+'>';const pos=this.raw.toLowerCase().indexOf(close);if(pos<0){this.raw=this.raw.slice(-close.length);break;}this.raw=this.raw.slice(pos+close.length);this.hidden=null;continue;}
       if(this.fenced){const pos=this.raw.indexOf(this.fenced);if(pos<0){this.raw=this.raw.slice(-2);if(final)this.raw='';break;}this.raw=this.raw.slice(pos+3);this.fenced=null;this.lineStart=true;continue;}
       if(this.discardLink){const end=this.raw.indexOf(')');const newline=this.raw.indexOf('\n');if(end>=0&&(newline<0||end<newline)){this.raw=this.raw.slice(end+1);this.discardLink=false;continue;}if(newline>=0){this.raw=this.raw.slice(newline);this.discardLink=false;continue;}this.raw='';break;}
@@ -72,16 +74,16 @@ export class SpeechQueue {
   }
   push(text){if(this.closed||!text?.trim())return false;if(this.items.length>=this.maxQueued){this.onError(Error('朗读队列已满，已跳过多余文本'));return false;}this.items.push({id:++this.sequence,text:text.slice(0,1500),chunks:[],buffered:0,waiters:[]});this.prefetch();this.pump();return true;}
   wake(item){for(const resolve of item.waiters.splice(0))resolve();}
-  wait(item,timeout){return new Promise(resolve=>{let timer;const wake=()=>{clearTimeout(timer);const index=item.waiters.indexOf(wake);if(index>=0)item.waiters.splice(index,1);resolve();};item.waiters.push(wake);if(timeout)timer=setTimeout(wake,timeout);});}
+  wait(item){return new Promise(resolve=>item.waiters.push(resolve));}
   async bounded(operation,signal){let timer,fail;const abort=new Promise((_,reject)=>{fail=()=>reject(new DOMException('Speech cancelled','AbortError'));if(signal.aborted)fail();else signal.addEventListener('abort',fail,{once:true});});try{return await Promise.race([operation,abort,new Promise((_,reject)=>timer=setTimeout(()=>reject(Error('语音合成流读取超时')),30000))]);}finally{clearTimeout(timer);signal.removeEventListener('abort',fail);}}
   prefetch(){let active=this.items.filter(item=>item.promise).length;for(const item of this.items){if(active>=this.concurrency)break;if(item.promise)continue;active++;const controller=new AbortController();item.controller=controller;this.controllers.add(controller);const epoch=this.epoch;
       item.promise=(async()=>{let reader;try{
         const response=await this.bounded(Promise.resolve().then(()=>this.synthesize(item.text,controller.signal)).then(response=>{if(controller.signal.aborted)response.body?.cancel().catch(()=>{});return response;}),controller.signal);
-        if(epoch!==this.epoch||controller.signal.aborted){await response.body?.cancel().catch(()=>{});return;}
+        if(epoch!==this.epoch||controller.signal.aborted){response.body?.cancel().catch(()=>{});return;}
         if(response.ok===false)throw Error('语音合成失败：'+response.status);if(!response.body?.getReader)throw Error('TTS 未返回流式 PCM');
-        reader=response.body.getReader();item.reader=reader;this.readers.add(reader);
+        reader=response.body.getReader();this.readers.add(reader);
         while(epoch===this.epoch&&!controller.signal.aborted){
-          // Each prefetched sentence has a strict 2-second PCM budget; sender releases capacity.
+          // Each prefetched sentence has a bounded PCM budget; playback releases capacity.
           while(item.buffered>=this.maxPrefetchBytes&&epoch===this.epoch&&!controller.signal.aborted)await this.wait(item);
           if(epoch!==this.epoch||controller.signal.aborted)break;
           const {done,value}=await this.bounded(reader.read(),controller.signal);if(done)break;if(value.byteLength>1024*1024)throw Error('TTS 音频包超出限制');
@@ -91,14 +93,12 @@ export class SpeechQueue {
             const size=Math.min(value.length-offset,this.maxPrefetchBytes-item.buffered),part=value.slice(offset,offset+size);offset+=size;item.chunks.push(part);item.buffered+=size;this.wake(item);
           }
         }
-      }catch(error){item.error=error;}finally{item.done=true;this.wake(item);controller.abort();this.controllers.delete(controller);if(reader){this.readers.delete(reader);await reader.cancel().catch(()=>{});reader.releaseLock();}}})();
+      }catch(error){item.error=error;}finally{item.done=true;this.wake(item);controller.abort();this.controllers.delete(controller);if(reader){this.readers.delete(reader);reader.cancel().catch(()=>{});reader.releaseLock();}}})();
     }}
-  pump(){if(this.running)return this.running;const epoch=this.epoch;const run=(async()=>{while(this.items.length&&epoch===this.epoch){this.prefetch();const item=this.items[0];let first=true;try{
+  pump(){if(this.running)return this.running;const epoch=this.epoch;const run=(async()=>{while(this.items.length&&epoch===this.epoch){this.prefetch();const item=this.items[0];try{
         while(epoch===this.epoch){if(item.chunks.length){
-          if(!first&&!item.done&&item.buffered<1920)await this.wait(item,20);
-          if(epoch!==this.epoch)break;
           const size=Math.min(item.buffered,1920),chunk=new Uint8Array(size);let used=0;while(used<size){const part=item.chunks[0],count=Math.min(part.length,size-used);chunk.set(part.subarray(0,count),used);used+=count;if(count===part.length)item.chunks.shift();else item.chunks[0]=part.subarray(count);}
-          item.buffered-=size;this.wake(item);await this.player.enqueue(chunk,item.id);first=false;}else if(item.done){if(item.error)throw item.error;this.player.segmentEnd(item.id);break;}else await this.wait(item);}
+          item.buffered-=size;this.wake(item);await this.player.enqueue(chunk,item.id);}else if(item.done){if(item.error)throw item.error;this.player.segmentEnd(item.id);break;}else await this.wait(item);}
       }catch(error){if(epoch===this.epoch&&error.name!=='AbortError')this.onError(error);}finally{item.controller.abort();this.wake(item);}
       if(epoch===this.epoch){this.items.shift();this.prefetch();}
     }})();let wrapped;this.running=wrapped=run.finally(()=>{if(this.running===wrapped)this.running=null;if(this.items.length&&!this.closed)this.pump();});return wrapped;}

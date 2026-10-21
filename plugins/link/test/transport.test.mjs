@@ -79,6 +79,9 @@ test('reverse proxy example keeps workbench streams and uplinks unbuffered', asy
   const config = await readFile(new URL('../config/nginx.example.conf', import.meta.url), 'utf8');
   for (const directive of [
     'proxy_http_version 1.1;',
+    'location = /link/workbench/api/voice/realtime {',
+    'proxy_set_header Upgrade $http_upgrade;',
+    'proxy_set_header Connection "upgrade";',
     'proxy_set_header Connection "";',
     'proxy_buffering off;',
     'proxy_request_buffering off;',

@@ -7,6 +7,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import ssh2 from 'ssh2';
+import { createServer as createHttpsServer } from 'node:https';
+import { loadIdentity } from '../src/transport/tls.mjs';
+import { verifyServerWorkbench } from '../src/server/manager.mjs';
 import { createServerManager, fingerprintOf, validateSshInput, shellQuote, redactServerLog, openSshTunnel, execute } from '../src/server/manager.mjs';
 const key = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs1', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } }).privateKey;
 async function fixture(t, options = {}) {
@@ -74,4 +77,27 @@ test('saved servers reopen offline; disconnect removes private record without de
 test('server logs redact credentials, bearer, URL and private JSON fields', () => {
   const text = redactServerLog('Bearer abc-123 https://host/?token=hidden&code=paired {"token":"json-secret","password":"pass"} private-key-value', ['private-key-value']);
   for (const value of ['abc-123', 'hidden', 'paired', 'json-secret', 'pass"', 'private-key-value']) assert(!text.includes(value), value);
+});
+test('server workbench verification requires pinned TLS, valid token, cookie and ready HTML', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-server-ready-')), identity = await loadIdentity(directory);
+  let calls = 0, ready = false, cookie = true;
+  const server = createHttpsServer({ key: identity.key, cert: identity.cert }, (req, res) => {
+    calls++;
+    if (req.url === '/link/api/workbench') {
+      if (req.headers.authorization !== 'Bearer good-token') { res.writeHead(401); res.end('{"error":"invalid token"}'); return; }
+      res.writeHead(200, cookie ? { 'set-cookie': 'dsh_link_workbench=session; HttpOnly; Secure; Path=/link/workbench/' } : {});
+      res.end('{"url":"/link/workbench/"}'); return;
+    }
+    assert.equal(req.headers.cookie, 'dsh_link_workbench=session');
+    assert.equal(req.headers.authorization, undefined);
+    res.writeHead(ready ? 200 : 503, { 'content-type': 'text/html' }); res.end('<html>workbench</html>');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await rm(directory, { recursive: true, force: true }); });
+  const target = { url: 'https://127.0.0.1:' + server.address().port, pin: identity.pin, token: 'good-token' };
+  await assert.rejects(verifyServerWorkbench({ ...target, pin: Buffer.alloc(32, 1).toString('base64') }), /指纹/); assert.equal(calls, 0);
+  await assert.rejects(verifyServerWorkbench({ ...target, token: 'bad-token' }), /invalid token/);
+  cookie = false; await assert.rejects(verifyServerWorkbench(target), /工作台授权/);
+  cookie = true; await assert.rejects(verifyServerWorkbench(target), /尚未就绪/);
+  ready = true; await verifyServerWorkbench(target);
 });

@@ -18,7 +18,7 @@ DSH-Plus 内置语音模块，目录 `plugins/commander/voice/`，技术包名 `
 
 ASR 默认采用 OpenAI 兼容 `POST <baseURL>/audio/transcriptions`：multipart 字段包含 `file`（24 kHz 单声道 PCM16 WAV）、`model`、`response_format: json`。`transcriptions` 接收 JSON `text`；`transcriptions-sse` 额外发送 `stream=true`，接收转录增量。SSE 是分段上传后的流式输出，不是持续音频输入。
 
-持续 PCM 输入显式选择 `openai-websocket` 或 `step-websocket`：前者使用 OpenAI session/delta 协议，默认 `<baseURL>/realtime?intent=transcription`；后者是独立的 Step wire adapter，默认 `<baseURL>/realtime/asr/stream`。两者共用浏览器采集、服务端 WSS 连接、取消和事件转发机制；不会根据域名或供应商 ID 改写路由。`asr.realtime.url` 可配置完整 HTTP(S)/WS(S) 地址及非敏感查询参数，`asr.realtime.query` 支持非敏感路由字段与 `{model}` 占位符，详见 [STREAMING.md](STREAMING.md)。切换供应商会清理旧实时路由覆盖；显式 `protocol` 优先，只有无协议字段的明确旧模型配置保留兼容推断。
+持续 PCM 输入显式选择 `openai-websocket` 或 `step-websocket`：前者使用 OpenAI session/delta 协议，默认 `<baseURL>/realtime?intent=transcription`；后者是独立的 Step wire adapter，默认 `<baseURL>/realtime/asr/stream`。两者共用 20 ms PCM 采集、独立二进制 WebSocket、有界发送队列、服务端 WSS 和取消机制；不会根据域名或供应商 ID 改写路由。`asr.realtime.url` 可配置完整 HTTP(S)/WS(S) 地址及非敏感查询参数，`asr.realtime.query` 支持非敏感路由字段与 `{model}` 占位符，详见 [STREAMING.md](STREAMING.md)。切换供应商会清理旧实时路由覆盖；显式 `protocol` 优先，只有无协议字段的明确旧模型配置保留兼容推断。
 
 TTS 默认 `speech` 使用 OpenAI 兼容 `POST <baseURL>/audio/speech`，只发送 `model`、`voice`、`input`、`response_format: pcm`。明确选择 `step-speech` 才额外发送 `sample_rate: 24000`、`stream: true`；无协议字段的明确 Step 旧模型保留兼容推断，显式 `speech` 可覆盖。播放合同统一为 **PCM16LE / 24000 Hz / 单声道**，并拒绝冲突的采样率或声道元数据；MP3、WAV、其他采样率不在当前适配范围。并非任意文字模型 API 都支持语音接口。
 
@@ -36,11 +36,12 @@ npm run test:voice
 
 ## 机制与边界
 
-参考 [实时语音 Agent 处理层实现详解](../../../Design/实时语音Agent处理层实现详解.md)（DraftGo 分析基线 `eed72d1`），复用其生命周期、取消隔离和播放确认思路。本文描述本插件实际实现，不能把原项目的全部能力视为已经迁移。
+复用历史实时语音处理层的生命周期、取消隔离和播放确认思路。本文描述本插件实际实现，不能把原项目的全部能力视为已经迁移。
 
 - AudioWorklet 连续采集和播放，保留重采样相位；24 kHz PCM16LE。实际消费完整片段后确认播放，收到数据不等于听到。
 - 浏览器 AEC / NS / AGC，自适应 RMS VAD、预卷和停说判定。已使用持续 windowed-sinc 重采样与自适应起播缓冲；**未移植 TEN VAD、RNNoise**，外放建议先用耳机验证。
-- 文本可朗读过滤、安全断句、3 路 TTS 预取、有序播放、有限缓冲；过滤不等于完备敏感数据防护。
+- 实时上行待发送队列最多 600 ms，拥塞淘汰旧帧并提示，避免延迟累积；不会因此直接挂断。播放 60–180 ms 自适应起播、短暂欠载不解除回声保护，插话确认 200 ms、停说 320 ms（实现值，非端到端性能保证）。
+- 文本可朗读过滤、首句/首分句及时合成、3 路 TTS 预取、有序播放、有限缓冲；过滤不等于完备敏感数据防护。
 - 单会话单主动设备，45 秒租约，15 秒心跳，最长 30 分钟；进程重启不恢复旧音频、不重放工具。
 - 挂断、断网、切换会话、插件卸载和配置更新传播取消；取消不会撤销已经完成的工具操作。
 - 播放确认仅用于本地片段队列与播放状态，不发送给 Agent，也不追加到用户消息。官方 `conversation.send(text)` 将文本原样提交为用户消息，目前没有接入可按轮安全传递播放事实的私有上下文接口；不承诺模型知道用户实际听到的位置。发送失败仅恢复待发转录，切换会话丢弃旧会话待发内容与迟到回调。

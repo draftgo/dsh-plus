@@ -1,3 +1,4 @@
+import { Select } from '../../shared/client/select.jsx';
 import { readJsonResponse } from './http-response.mjs';
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { LinkIconMedium, Modal, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives';
@@ -97,7 +98,7 @@ export function UpdateLauncher({ host, wide = true }) {
   };
   const close = () => setOpen(false);
   return <>
-    <Tooltip label={status ? `更新 · ${status}` : '更新'} delayMs={450} portal>
+    <Tooltip label={status ? `更新 · ${status}` : '更新'} side="top" gap={10} delayMs={450} portal>
       <button type="button" className={`cmd-update-launcher ${wide ? '' : 'cmd-update-launcher-rail'}`} aria-label={status ? `更新，${status}` : '更新'} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>
         <span className="cmd-update-icon"><UIIcon name="refresh" size={16} />{(newVersion || restart) && <i aria-hidden="true" />}</span>
         {wide && <><span>更新</span>{status && <small data-ready={restart}>{status}</small>}</>}
@@ -121,7 +122,7 @@ export function UpdateLauncher({ host, wide = true }) {
         {canOpenAppUpdates ? <section className="cmd-update-app"><UIIcon name="external" size={17} /><div><h3>{appAvailable ? '应用有新版本' : '桌面应用'} <span>{appAvailable ? `v${app.version}` : data?.current?.app ? `v${data.current.app}` : ''}</span></h3><p>{!data?.current?.app ? '应用版本暂无法识别，可手动检查更新。' : '引擎或桌面能力升级时，才需更新应用。'}</p></div><span className="cmd-update-app-actions"><button type="button" className="cmd-update-text-button" disabled={working} onClick={() => void openAppUpdates()}>{pending === 'app' ? '正在打开…' : '检查应用更新'}</button>{appAvailable && appUrl && <a className="cmd-update-text-button" href={appUrl} target="_blank" rel="noopener noreferrer">下载安装包<UIIcon name="external" size={12} /></a>}</span></section> : data?.current?.app ? <p className="cmd-update-app-version">主机应用 v{data.current.app}{appAvailable && ` → v${app.version}，请在主机上更新`}{data.current.engine && ` · 引擎 ${data.current.engine}`}</p> : null}
         {(error || (!unpublished && data?.error)) && <div className="cmd-update-error" role="alert"><span>{error || data.error}</span><button type="button" className="cmd-update-text-button" disabled={!!pending || (working && retryAction.current.action !== 'status')} onClick={() => void retry()}>重试</button></div>}
         <section className="cmd-update-source" aria-labelledby={`${id}-source`}>
-          <div className="cmd-update-source-row"><label htmlFor={`${id}-source-select`} id={`${id}-source`}><LinkIconMedium kind="url" href="https://github.com" size={16} />更新来源</label><select id={`${id}-source-select`} value={source} disabled={working || restart} onChange={event => { const value = event.target.value; setSource(value); setError(''); if (value !== 'custom') void configure(value); }}>{Object.entries(sourceNames).map(([value, label]) => <option key={value} value={value}>{label}{value === 'mirror' ? '（默认）' : ''}</option>)}</select></div>
+          <div className="cmd-update-source-row"><label htmlFor={`${id}-source-select`} id={`${id}-source`}><LinkIconMedium kind="url" href="https://github.com" size={16} />更新来源</label><Select id={`${id}-source-select`} value={source} disabled={working || restart} onChange={event => { const value = event.target.value; setSource(value); setError(''); if (value !== 'custom') void configure(value); }}>{Object.entries(sourceNames).map(([value, label]) => <option key={value} value={value}>{label}{value === 'mirror' ? '（默认）' : ''}</option>)}</Select></div>
           {source === 'custom' && <form className="cmd-update-custom" onSubmit={event => { event.preventDefault(); void configure('custom', event.currentTarget.elements.namedItem('mirrorUrl').value); }}><input name="mirrorUrl" type="url" required aria-label="自定义 HTTPS 镜像地址" placeholder="https://mirror.example.com/" value={mirrorUrl} disabled={working || restart} onChange={event => setMirrorUrl(event.target.value)} /><button type="submit" className="cmd-update-button" disabled={working || restart}>保存</button></form>}
           <p>从 GitHub 发布页获取；加速镜像仅用于下载。</p>
         </section>

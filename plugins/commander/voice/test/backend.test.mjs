@@ -111,9 +111,9 @@ test('configuration rejects unsafe URL shapes, unknown fields and header injecti
 test('routes inherit official owner-only Connection routes and use streaming bounded request bodies', () => {
   const registered = [], effects = [];
   mountWeb({ effect(fn) { effects.push(fn()); }, connection: { fetch: { register(route) { registered.push(route); return () => {}; } } } }, memory());
-  assert.deepEqual(registered.map(route => route.path), ['/api/voice', '/api/voice/transcribe', '/api/voice/speech', '/api/voice/realtime/audio', '/api/voice/worklet']);
-  assert.equal(registered.slice(0, 4).every(route => route.requestBody === 'streaming' && route.methods.join() === 'POST'), true);
-  assert.deepEqual(registered[4].methods, ['GET']);
+  assert.deepEqual(registered.map(route => route.path), ['/api/voice', '/api/voice/transcribe', '/api/voice/speech', '/api/voice/worklet']);
+  assert.equal(registered.slice(0, 3).every(route => route.requestBody === 'streaming' && route.methods.join() === 'POST'), true);
+  assert.deepEqual(registered[3].methods, ['GET']);
   for (const cleanup of effects) cleanup?.();
 });
 
@@ -210,22 +210,6 @@ test('call APIs bind media to lease; config change and hangup abort live audio i
   assert.equal((await handlers.config(json('/api/voice', { action: 'call.heartbeat', ...next.call }))).status, 409); handlers.dispose();
 });
 
-test('Step native realtime routes enforce owner boundary, forward PCM, stream revisions and cancel on config change', async()=>{
-  const {EventEmitter}=await import('node:events');let socket, connectedUrl;
-  class FakeSocket extends EventEmitter{constructor(){super();this.sent=[];this.bufferedAmount=0;queueMicrotask(()=>this.emit('open'));}send(raw){const e=JSON.parse(raw);this.sent.push(e);if(e.type==='session.update')queueMicrotask(()=>this.emit('message',JSON.stringify({type:'session.updated'})));}close(){this.closed=true;}}
-  const store=memory();store.value.asr.protocol='step-websocket';store.value.asr.model='stepaudio-2.5-asr-stream';store.value.asr.baseURL='https://routergo.cn/api/v1';store.value.asr.realtime={url:'wss://routergo.cn/api/v1/realtime',query:{model:'{model}',intent:'transcription',exit_id:'stepfun.audio.transcriptions.websocket'}};
-  const h=createVoiceHandlers(store,{socket:(url)=>{connectedUrl=url;return socket=new FakeSocket();}});
-  assert.equal((await h.config(json('/api/voice',{action:'asr.start'},{headers:{'content-type':'application/json',origin:'https://evil.test'}}))).status,403);
-  const started=await h.config(json('/api/voice',{action:'asr.start'}));assert.equal(started.status,200);const {id}=await started.json();
-  assert.equal(connectedUrl,'wss://routergo.cn/api/v1/realtime?model=stepaudio-2.5-asr-stream&intent=transcription&exit_id=stepfun.audio.transcriptions.websocket');
-  const downstream=await h.config(json('/api/voice',{action:'asr.events',id}));assert.equal(downstream.headers.get('content-type'),'application/x-ndjson');const reader=downstream.body.getReader();
-  const append=await h.realtimeAppend(new Request('http://app.test/api/voice/realtime/audio',{method:'POST',headers:{'content-type':'application/octet-stream','x-voice-session-id':id,'x-voice-utterance-id':'1'},body:new Uint8Array(4800)}));assert.equal(append.status,200);assert.equal(socket.sent[1].type,'input_audio_buffer.append');
-  const committed=await h.config(json('/api/voice',{action:'asr.commit',id,utteranceId:1}));assert.equal(committed.status,200);
-  socket.emit('message',JSON.stringify({type:'conversation.item.input_audio_transcription.delta',text:'修订'}));const e=JSON.parse(new TextDecoder().decode((await reader.read()).value));assert.equal(e.text,'修订');
-  socket.emit('message',JSON.stringify({type:'conversation.item.input_audio_transcription.completed',transcript:'最终结果'}));assert.equal(JSON.parse(new TextDecoder().decode((await reader.read()).value)).type,'final');
-  await h.config(json('/api/voice',{action:'configure',config:{dictation:false}}));assert.equal(socket.closed,true);assert.equal((await reader.read()).done,true);
-  assert.equal((await h.config(json('/api/voice',{action:'asr.commit',id,utteranceId:1}))).status,409);h.dispose();
-});
 test('voice calls preserve the selected provider ASR ID in realtime routing and session settings', async () => {
   const { EventEmitter } = await import('node:events'); let socket, connectedUrl;
   class FakeSocket extends EventEmitter {

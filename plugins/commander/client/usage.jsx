@@ -11,7 +11,7 @@ const sources = { harness: 'Harness 会话', 'official-harness': 'Harness 会话
 const number = value => value == null ? '未提供' : new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 }).format(value);
 const date = value => { const day = new Date(value); return [day.getFullYear(), String(day.getMonth() + 1).padStart(2, '0'), String(day.getDate()).padStart(2, '0')].join('-'); };
 function range(days) { const end = new Date(); end.setHours(0, 0, 0, 0); const start = new Date(end); start.setDate(start.getDate() - days + 1); return { start: date(start), end: date(end) }; }
-export function UsageLauncher() { return <Tooltip label="用量统计" delayMs={450} portal><button type="button" className="cmd-archive-launcher" aria-label="用量统计" aria-haspopup="dialog" onClick={() => document.dispatchEvent(new Event('commander:usage'))}><span className="cmd-usage-bars" aria-hidden="true"><i /><i /><i /></span></button></Tooltip>; }
+export function UsageLauncher() { return <Tooltip label="用量统计" side="top" gap={10} delayMs={450} portal><button type="button" className="cmd-archive-launcher" aria-label="用量统计" aria-haspopup="dialog" onClick={() => document.dispatchEvent(new Event('commander:usage'))}><span className="cmd-usage-bars" aria-hidden="true"><i /><i /><i /></span></button></Tooltip>; }
 export function mountUsageStyle(ctx) { const style = document.createElement('style'); style.textContent = css + themeCss; document.head.append(style); ctx.effect(() => () => style.remove()); }
 export function UsageDialog() {
   const [view, setView] = useState('overview'), [page, setPage] = useState(1);

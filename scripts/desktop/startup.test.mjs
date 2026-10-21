@@ -15,8 +15,30 @@ test('desktop startup keeps the app identity and local mascot beside the DeepSee
   assert.ok(html.includes('<span class="startup-engine">DeepSeek</span>'));
   assert.doesNotMatch(html, /(?:src|href)="https?:/);
   assert.ok(css.includes('.startup-brand { display: flex;'));
-  assert.ok(css.includes('animation: xiaojiao-float'));
-  assert.ok(css.includes('@media (prefers-reduced-motion: reduce) { .startup-mascot { animation: none; } }'));
+  assert.ok(css.includes('animation: startup-scan'));
+  assert.ok(css.includes('@media (prefers-reduced-motion: reduce)'));
+  assert.ok(css.includes('animation: none;'));
+});
+
+test('native splash stays local and only updates its waiting message after 20 seconds', async () => {
+  const html = await readFile(new URL('./renderer/splash.html', import.meta.url), 'utf8');
+  const script = await readFile(new URL('./renderer/splash.js', import.meta.url), 'utf8');
+  assert.ok(html.includes('src="assets/dsh-plus-logo.png"'));
+  assert.ok(html.includes('href="dsh-plus-startup.css"'));
+  assert.ok(html.includes('role="status" aria-live="polite"'));
+  assert.doesNotMatch(html, /(?:src|href)="https?:/);
+  assert.doesNotMatch(script, /dshWelcome|ipcRenderer|require\(|fetch\(/);
+  const status = { textContent: '启动中…' };
+  let delay;
+  let waiting;
+  vm.runInNewContext(script, {
+    document: { getElementById: () => status },
+    setTimeout: (callback, milliseconds) => { waiting = callback; delay = milliseconds; },
+  });
+  assert.equal(status.textContent, '启动中…');
+  assert.equal(delay, 20000);
+  waiting();
+  assert.equal(status.textContent, '仍在准备中，请稍候…');
 });
 function startup(skip) {
   const handlers = new Map();

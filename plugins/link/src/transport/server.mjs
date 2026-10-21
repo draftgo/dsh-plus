@@ -79,27 +79,31 @@ export async function listen({ identity, config, webRoot, store, dispatch, workb
     response.writeHead(status, { ...headers, 'content-type': type });
     response.end(type.startsWith('application/json') ? JSON.stringify(value) : value);
   };
+  const authorize = (req, requireOrigin = false) => {
+    if (!active) throw fail('Link 已关闭', 503);
+    const publicHost = config.publicUrl ? new URL(config.publicUrl).host : undefined;
+    const allowed = new Set(['localhost', '127.0.0.1', '::1', ...localAddresses(), config.host].map(a => authority(a, server.address().port)));
+    if (publicHost) allowed.add(publicHost);
+    const host = req.headers[':authority'] || req.headers.host;
+    if (req.headers.host && req.headers[':authority'] && req.headers.host !== req.headers[':authority']) throw fail('主机地址不一致', 403);
+    if (!host || !allowed.has(host)) throw fail('主机地址未授权', 403);
+    if ((requireOrigin || req.headers.origin) && req.headers.origin !== `https://${host}`) throw fail('来源未授权', 403);
+    const url = new URL(req.url, `https://${host}`);
+    const ip = req.socket.remoteAddress ?? 'unknown';
+    const tick = Math.floor(Date.now() / 60_000);
+    if (rates.size > 1024) for (const [key, entry] of rates) if (entry.tick !== tick) rates.delete(key);
+    if (rates.size > 1024 && !rates.has(ip)) throw fail('请求过多', 429);
+    const rate = rates.get(ip)?.tick === tick ? rates.get(ip) : { tick, count: 0, pairs: 0 };
+    rates.set(ip, rate);
+    if (++rate.count > 600) throw fail('请求过多，请稍后重试', 429);
+    return { url, rate };
+  };
   // Harness opens several persistent subscriptions. Multiplex them over HTTP/2
   // so session navigation and uplink calls cannot exhaust a browser's H1 pool.
   // Keep HTTP/1.1 for existing native clients and reverse proxies.
   const server = createSecureServer({ key: identity.key, cert: identity.cert, minVersion: 'TLSv1.2', allowHTTP1: true }, async (req, res) => {
     try {
-      if (!active) throw fail('Link 已关闭', 503);
-      const publicHost = config.publicUrl ? new URL(config.publicUrl).host : undefined;
-      const allowed = new Set(['localhost', '127.0.0.1', '::1', ...localAddresses(), config.host].map(a => authority(a, server.address().port)));
-      if (publicHost) allowed.add(publicHost);
-      const host = req.headers[':authority'] || req.headers.host;
-      if (req.headers.host && req.headers[':authority'] && req.headers.host !== req.headers[':authority']) throw fail('主机地址不一致', 403);
-      if (!host || !allowed.has(host)) throw fail('主机地址未授权', 403);
-      if (req.headers.origin && req.headers.origin !== `https://${host}`) throw fail('来源未授权', 403);
-      const url = new URL(req.url, `https://${host}`);
-      const ip = req.socket.remoteAddress ?? 'unknown';
-      const tick = Math.floor(Date.now() / 60_000);
-      if (rates.size > 1024) for (const [key, entry] of rates) if (entry.tick !== tick) rates.delete(key);
-      if (rates.size > 1024 && !rates.has(ip)) throw fail('请求过多', 429);
-      const rate = rates.get(ip)?.tick === tick ? rates.get(ip) : { tick, count: 0, pairs: 0 };
-      rates.set(ip, rate);
-      if (++rate.count > 600) throw fail('请求过多，请稍后重试', 429);
+      const { url, rate } = authorize(req);
       if (url.pathname.startsWith('/link/workbench/')) {
         if (!workbench) throw fail('网页工作台尚未就绪', 503);
         return await workbench.handle(req, res, url, headers);
@@ -117,7 +121,9 @@ export async function listen({ identity, config, webRoot, store, dispatch, workb
       if (url.pathname === '/link/api/pair') {
         if (++rate.pairs > 12) throw fail('配对请求过多', 429);
         const input = await body(req);
-        return send(res, 200, store.request(input.code, input.name));
+        const agent = req.headers['user-agent'] || '';
+        const deviceType = /iPad|Tablet/i.test(agent) ? 'tablet' : /Android|iPhone|Mobile/i.test(agent) ? 'mobile' : /Windows|Macintosh|X11/i.test(agent) ? 'computer' : 'unknown';
+        return send(res, 200, store.request(input.code, input.name, deviceType));
       }
       if (url.pathname === '/link/api/pair/status') {
         const input = await body(req);
@@ -135,6 +141,18 @@ export async function listen({ identity, config, webRoot, store, dispatch, workb
       if (!active || !store.state.devices.some(d => d.id === device.id)) throw fail('设备授权已失效', 401);
       return send(res, 200, await dispatch(input, device));
     } catch (e) { if (res.headersSent) res.destroy(); else send(res, e.status ?? 400, { error: e.message }); }
+  });
+  server.on('upgrade', (req, socket, head) => {
+    socket.on('error', () => {});
+    try {
+      const { url } = authorize(req, true);
+      if (url.pathname !== '/link/workbench/api/voice/realtime') throw fail('未找到', 404);
+      if (!workbench?.upgrade) throw fail('实时语音尚未就绪', 503);
+      workbench.upgrade(req, socket, head);
+    } catch (error) {
+      const status = error.status ?? 400;
+      socket.end(`HTTP/1.1 ${status} Rejected\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+    }
   });
   server.on('connection', socket => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); });
   server.on('session', session => { sessions.add(session); session.once('close', () => sessions.delete(session)); });

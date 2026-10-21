@@ -9,7 +9,12 @@
 - `seal-runtime.mjs`：注入后通过官方 writer 重建完整文件哈希与共享包清单。
 - `electron-builder.config.mjs`：扩展官方配置，独立 appId / 产品名，预览关闭自动更新与强制升级策略；不引用官方更新服务。
 - `prepare-brand.mjs`：从 `assets/brand/` 生成小角 Windows、托盘、安装/卸载图标，官方源码保持不变。
+- `prepare-tray.mjs`：官方完整构建后复用官方 tsdown 主进程配置，仅在编译输入中将 Windows 托盘菜单改为“主窗口”“退出”（英文 Main Window / Quit），输出到根目录 `.local/desktop/main/`，由正式 Windows 打包入口映射为 `lib/main.js`。保留官方显示窗口、退出确认与动态语言切换；不修改子模块源码或官方产物，不运行时拦截。官方模块、配置或文案锚点变化立即中止打包，需人工检查兼容性。
 - `renderer/`：打包时通过官方文件映射替换初始化页面，只展示小角和工作台准备状态，通过已有 `dshWelcome.skip()` 进入工作台；失败可重试，不写入虚假凭据或登录状态。模型凭据在工作台内配置。
+- `prepare-startup.mjs` / `startup-window.mjs`：复用根目录主进程编译步骤，在官方 `main()` 开始时加载 420×300 小角启动卡片，覆盖后端初始化等待；其他窗口显示、致命错误或退出时销毁。编译锚点变化中止打包，不修改上游源码、不做运行时拦截。仅正式 Plus Windows 打包入口接入，普通官方 dev/start 不变。
+- `renderer/splash.html`：本地 Logo、墨黑描边与冷青 loading，不显示虚假百分比，不设最低停留时长；20 秒后提示仍在准备，支持减少动效。卡片只能在 Electron ready 后显示，无法覆盖操作系统加载 exe 的阶段，也不缩短实际初始化时间。
+
+启动卡片验证：`node --test scripts/desktop/startup-window.test.mjs scripts/desktop/startup.test.mjs` 覆盖窗口显示/销毁、失败回退、编译锚点和页面重试；主进程编译与打包映射复用 `prepare-tray.test.mjs`。2026-10-20 已通过定向测试和实际主进程编译（当前 Node 22 使用仓库 tsx loader）；未生成新 Windows EXE、未实跑 Windows GUI。
 - `smoke-windows.mjs`：验证打包资源、官方 Host 启动、离线配对 profile 初始化与认证 Link 管理接口。
 - `test-install-windows.ps1`：CI 静默安装、旧实体残留重装修复与原位升级；通过官方解析器验证实际插件元数据、入口及客户端路径。
 
@@ -28,6 +33,8 @@ npm run package:plus:win
 ```
 
 完整构建会下载 Electron、Node/Python/Git 等官方 runtime 资源与生产包。不使用签名或上传凭据；产物为未签名预览安装包，Windows 可能显示 SmartScreen 提示。
+
+托盘改字定向验证：使用 Node 24 执行 `node --test scripts/desktop/prepare-tray.test.mjs scripts/desktop/packaging-config.test.mjs`。测试实际编译主进程、验证菜单文字及原显示/退出行为，打入临时 ASAR 后读取校验并自动清理；不启动 GUI 或构建完整 EXE。正式打包的 `afterPack` 同样读取实际 `app.asar/lib/main.js`，防止资源映射漏装。2026-10-20 已通过这 8 项测试；Windows GUI 与完整新安装包尚未验证。
 
 ## 数据和更新边界
 

@@ -38,6 +38,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingBootstrap: String? = null
     private lateinit var devicesButton: android.widget.TextView
     private lateinit var appearance: NativeAppearance
+    private lateinit var deviceNavigation: NativeDeviceNavigation
     private var workbenchIdentity: Identity? = null
     private var microphoneRequest: android.webkit.PermissionRequest? = null
     private var uploadCallback: android.webkit.ValueCallback<Array<android.net.Uri>>? = null
@@ -86,6 +87,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(layout)
         androidx.core.view.ViewCompat.requestApplyInsets(layout)
         appearance = NativeAppearance(this, layout, devicesButton) { webView }
+        deviceNavigation = NativeDeviceNavigation(devicesButton, { webView }, ::returnToDevices)
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
         webView.settings.allowFileAccess = false
@@ -127,6 +129,7 @@ class MainActivity : AppCompatActivity() {
         microphoneRequest?.deny(); uploadCallback?.onReceiveValue(null)
         bridge.close()
         appearance.close()
+        deviceNavigation.close()
         localView.removeJavascriptInterface("LinkNative")
         workbenches.values.forEach { it.destroy() }; workbenches.clear()
         localView.destroy()
@@ -193,15 +196,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun deliverResult(script: String) { if (localView.url.orEmpty().startsWith(START_URL)) localView.evaluateJavascript(script, null) }
-    private fun showView(view: WebView) {
-        if (webView === view) return
+    private fun showView(view: WebView, deviceName: String? = null) {
+        if (webView === view) { deviceNavigation.show(view, deviceName); return }
         layout.removeView(webView); webView = view
         layout.addView(view, android.widget.LinearLayout.LayoutParams(-1, 0, 1f))
         appearance.show(view)
+        deviceNavigation.show(view, deviceName)
     }
     fun canOpenDevice(id: String): Boolean = workbenches.containsKey(id) || workbenches.size < 4
     fun forgetDevice(id: String) {
-        runOnUiThread { workbenches.remove(id)?.let { view -> if (view === webView) returnToDevices(); appearance.detach(view); view.destroy() } }
+        runOnUiThread { workbenches.remove(id)?.let { view -> if (view === webView) returnToDevices(); appearance.detach(view); deviceNavigation.detach(view); view.destroy() } }
     }
 
     fun openWorkbench(identity: Identity, cookie: String, isCurrent: () -> Boolean) {
@@ -212,14 +216,13 @@ class MainActivity : AppCompatActivity() {
                 android.webkit.CookieManager.getInstance().setCookie(identity.url + "/link/workbench/", cookie) { accepted ->
                     if (!isCurrent()) return@setCookie
                     if (accepted) {
-                        showView(cached); workbenchIdentity = identity; pendingBootstrap = null
+                        showView(cached, identity.publicJson().optString("name")); workbenchIdentity = identity; pendingBootstrap = null
                         devicesButton.text = "‹  设备 · " + identity.publicJson().optString("name")
-                        devicesButton.visibility = android.view.View.VISIBLE
                     } else workbenchFailed("无法保存工作台连接，请重试")
                 }
                 return@runOnUiThread
             }
-            cached?.let { workbenches.remove(identity.id); appearance.detach(it); it.destroy() }
+            cached?.let { workbenches.remove(identity.id); appearance.detach(it); deviceNavigation.detach(it); it.destroy() }
             val remote = WebView(this).apply {
                 settings.javaScriptEnabled = true; settings.domStorageEnabled = true
                 settings.allowFileAccess = false; settings.allowContentAccess = false
@@ -230,10 +233,10 @@ class MainActivity : AppCompatActivity() {
             android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(remote, false)
             workbenches[identity.id] = remote
             appearance.attach(remote, identity.url)
+            deviceNavigation.attach(remote, identity.url, identity.publicJson().optString("name"))
             showView(remote)
             workbenchIdentity = identity
             devicesButton.text = "‹  设备 · " + identity.publicJson().optString("name")
-            devicesButton.visibility = android.view.View.VISIBLE
             pendingBootstrap = null
             webView.removeJavascriptInterface("LinkNative")
             webView.webViewClient = workbenchClient(identity)
@@ -270,7 +273,7 @@ class MainActivity : AppCompatActivity() {
         }.getOrDefault(false)
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             if (allowed(request.url)) return false
-            if (request.url.toString() == identity.url + "/link/") { returnToDevices(); return true }
+            if (request.url.toString() == identity.url + "/link/") { if (request.isForMainFrame && view === webView) returnToDevices(); return true }
             if (request.url.scheme in listOf("https", "http", "mailto")) runCatching { startActivity(Intent(Intent.ACTION_VIEW, request.url)) }
             return true
         }
@@ -286,20 +289,28 @@ class MainActivity : AppCompatActivity() {
                 cert.checkValidity()
                 MessageDigest.isEqual(MessageDigest.getInstance("SHA-256").digest(cert.publicKey.encoded), Base64.getDecoder().decode(identity.pin))
             }.getOrDefault(false)
-            if (trusted) handler.proceed() else handler.cancel()
+            if (trusted) handler.proceed() else { deviceNavigation.pageFailed(view); handler.cancel() }
+        }
+        override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+            deviceNavigation.pageStarted(view)
+        }
+        override fun onReceivedError(view: WebView, request: WebResourceRequest, error: android.webkit.WebResourceError) {
+            if (request.isForMainFrame) deviceNavigation.pageFailed(view)
         }
         override fun onPageFinished(view: WebView, url: String) {
             if (allowed(android.net.Uri.parse(url))) {
                 appearance.pageReady(view)
+                deviceNavigation.pageReady(view)
                 val target = URI(url)
                 val path = target.rawPath + (target.rawQuery?.let { "?" + it } ?: "") + (target.rawFragment?.let { "#" + it } ?: "")
                 getSharedPreferences("link_locations", Context.MODE_PRIVATE).edit().putString(identity.id, path).apply()
             }
         }
         override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
+            if (request.isForMainFrame) deviceNavigation.pageFailed(view)
             if (request.isForMainFrame && response.statusCode == 401) {
                 if (view === webView) returnToDevices()
-                workbenches.remove(identity.id, view); appearance.detach(view); view.destroy()
+                workbenches.remove(identity.id, view); appearance.detach(view); deviceNavigation.detach(view); view.destroy()
             }
         }
     }

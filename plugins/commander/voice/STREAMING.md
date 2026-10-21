@@ -1,6 +1,6 @@
 # 流式语音协议与验证
 
-当前说明更新于 2026-10-18；历史探测日期另行标注。语音实现位于 `plugins/commander/voice/`，不修改上游和 reference。
+当前说明更新于 2026-10-20；历史探测日期另行标注。语音实现位于 `plugins/commander/voice/`，不修改上游和 reference。
 
 设置 → 语音 → 识别协议显式选择。默认采用 OpenAI 兼容接口；协议与路由不根据供应商域名或 ID 判断。Step 模型只是当前预填偏好，不代表绑定供应商。显式 `protocol` 始终优先；无协议字段的明确旧 MiMo/Step 模型保留兼容推断。
 
@@ -13,9 +13,22 @@
 | `mimo-sse` | `/chat/completions`，`input_audio` + `stream` | 供应商扩展，片段上传后增量返回 |
 | `step-sse`（旧接口） | `/audio/asr/sse`，`audio.data/input` | 供应商扩展，仅明确支持时使用 |
 
-原生 WSS 共用连接、鉴权、浏览器采集和事件转发机制，各协议 adapter 只处理上游 wire format。浏览器通过现有 owner 鉴权 HTTP 上传约 100 ms PCM，使用 NDJSON 接收识别事件，服务端保持上游 WSS；密钥仅在服务端通过 `Authorization` 请求头发送。客户端 VAD 手动 commit，停说等待 final；挂断、断网、租约失效和配置变更关闭媒体流与连接。
+原生 WSS 共用连接、鉴权、浏览器采集和事件转发机制，各协议 adapter 只处理上游 wire format。浏览器通过已鉴权 HTTP asr.start 建立供应商连接并领取一次性、10 秒有效的连接 ticket，再用独立 WebSocket /api/voice/realtime 持续发送 20 ms 二进制 PCM、接收识别与 ACK 事件；服务端保持上游 WSS，供应商密钥仅在服务端请求头中使用。Desktop 通过官方 connection.openWebSocket 选择 Host 与认证；Link 工作台和本地设备代理复用同一媒体协议，分别校验配对设备与私有代理会话。客户端 VAD 手动 commit，停说等待 final；挂断、断网、租约失效和配置变更关闭媒体流与连接。
 
 `transcriptions-sse`、`mimo-sse` 与 `step-sse` 均为分段上传后的流式输出，不是双向连续音频。浏览器在约 1.5 秒音频或停说后形成 WAV 分段；SSE 最多 2 个分段请求并发，结果按分段顺序合并。模型必须支持所选接口；例如历史 Step 文件转录使用 `stepaudio-2.5-asr`，不能替换成仅支持 WSS 的 `-stream` 模型。Step 1.1 增量 delta 语义不在 Step adapter 范围。
+
+
+## 低延迟调度（2026-10-20 已实现）
+
+- 保留供应商要求的 PCM16LE / 24 kHz / mono，采集帧为 480 样本（20 ms）；不为照搬设备 Opus 参数增加编码/解码依赖。openai-websocket / step-websocket 实时路线逐帧上行，删除旧 100 ms 串行 HTTP 上传和实时 NDJSON 长请求，普通 HTTP/SSE 文件识别继续保留其受支持路径。不会静默改写模型或协议；设置页对分段通话提示实时路线选择。
+- 待发送音频最多 30 帧 / 600 ms；拥塞淘汰最旧未发送帧，超过 600 ms 的帧过期。最多 12 帧在途并由 ACK 释放窗口，浏览器 socket 发送缓冲超过 1920 字节时暂停投递；服务端上游 socket 缓冲超过 12800 字节时非致命拒收当前帧，并提示用户重说。已进入 TCP 的帧不能撤回，以上均为调度限制，不是整轮延迟保证。
+- 二进制帧头为三个 little-endian uint32：epoch / utteranceId / sequence，随后 1–480 个 PCM16 样本。文本控制为 attach / commit / clear，响应包括 ready / ack / partial / final / error / closed；ticket 在首条 attach 中提交，不放 URL。旧 HTTP asr.events / asr.commit / asr.clear 和 /api/voice/realtime/audio 已删除；asr.start / asr.end 保留建连与兜底释放。供应商协议 adapter 不变。
+- commit 在调用时排入屏障；下一语段可立即采集入有界队列，但待旧 final 后才向不支持多段并行的上游发送。clear 优先清空队列、递增 epoch、取消旧结果，等供应商重连 ready 后恢复；重复静音清空重连期间新增的音频。
+- 输入预卷最多 220 ms，普通起音确认 100 ms、播放期间插话确认 200 ms、停说 320 ms、播放结束回声保护 220 ms。沿用浏览器 AEC / NS / AGC 与自适应能量 VAD，未引入 TEN VAD 或 RNNoise；参数为实现值，外放误触发与轻声识别需真机验收。
+- 播放从 60 ms 起播，欠载时每次增加 20 ms、最高 180 ms，稳定后回落；短尾在明确结束后直接播放。欠载不切回 listening，不解除 AEC 保护；明确结束/取消才清理活动态。保留实际消费 ACK、2 秒播放背压与三路有界 TTS 预取，不丢下行语音。
+- 完整句和合格的首段自然逗号立即提交合成；已有 PCM 立即进入播放器，保留单批最多 40 ms，删除额外 20 ms 合包定时器。挂断不等待供应商无法完成的 reader cancel。
+
+部署：官方 Web/Desktop 复用现有 listener；Link 使用 /link/workbench/api/voice/realtime，本地设备代理追加既有 /s/TOKEN 前缀。plugins/link/config/nginx.example.conf 新增精确 WS 升级路由，保留既有服务器鉴权继承。现有官方 /api/ 反代也须透传 Upgrade/Connection；不新增公网端口，不绕过云端访问鉴权。修改反代配置后由部署方按实际域名、端口和证书路径加载，本次未改运行中的服务。
 
 ## 实时路由配置
 
@@ -106,7 +119,7 @@
 - 插件真实处理器复测：Step TTS 200，41 个 PCM 包、122880 字节；合成音进入 MiMo ASR 后，NDJSON 返回 8 次 partial 和 final，文本为“你好，这是流式语音测试。”。单样本 TTS 首包约 3226 ms，ASR 首 partial 约 3171 ms、final 3422 ms；只是当次服务端时间，不是浏览器端整轮延迟或性能保证。
 - ASR 属于持续采集、分段提交、响应增量的组合架构。RouterGo 原生双向 WSS 已完成握手验证，完整音频事件闭环仍待真实账号联调；不能将 SSE 描述为持续 PCM 双向识别。
 - 历史迁移曾针对已知 RouterGo MiMo/Step 文件模型补齐 `transcriptions-sse`。当前迁移不判断 RouterGo 域名或供应商 ID，只对无协议字段的明确旧模型兼容推断；显式协议保留。迁移生效于启动内存快照，下次用户保存设置时持久化。
-- Step 原生 ASR 清空使用 `asr.clear`：替换上游 socket，等待新 `session.updated`，保留浏览器 session id 与事件流，旧 socket epoch 事件全部丢弃，避免不支持 clear 的供应商污染新输入。
+- 媒体 socket 的 `clear` 替换上游 socket，等待新 `session.updated`，保留浏览器 session id 与媒体连接，旧 socket epoch 事件全部丢弃，避免不支持 clear 的供应商污染新输入；原 HTTP 清空入口已删除。
 - TTS 采样率/声道元数据若与 24 kHz mono 矛盾立即拒绝；保持 PCM 半样本跨包拼接和取消传播。错误仅向前端返回状态与有界机器码，不转发供应商原始错误消息。
 
 ### `MALFORMED_RESPONSE` 根因

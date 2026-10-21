@@ -18,7 +18,7 @@
   const localStreams = new Map();
   const localConnection = () => {
     if (localSocket && localSocket.readyState <= 1) return localSocket;
-    const url = new URL('../../socket', base); url.protocol = 'ws:';
+    const url = new URL('../../socket', base); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     const socket = localSocket = new WebSocket(url);
     socket.addEventListener('message', event => {
       try { const frame = JSON.parse(event.data), stream = localStreams.get(frame.id); if (!stream) return; if (stream.items.length >= 128) { stream.error = new Error('工作台流消费过慢'); socket.close(); } else { stream.items.push(frame); stream.wake?.(); } } catch { socket.close(); }

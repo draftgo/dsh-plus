@@ -4,10 +4,13 @@ import { LinkMobileApp } from './mobile.jsx';
 import { BrandLogo } from './brand.jsx';
 import { DeviceCenter } from './device-center.jsx';
 import { hasDeviceCenter } from './device-runtime.mjs';
+import { connectDeviceTheme } from './device-theme.mjs';
 
 /** Pair once, then run the same workspace and plugins as the desktop browser. */
 export function LinkWorkbenchEntry() {
-  if (hasDeviceCenter()) return <DeviceCenter />;
+  const deviceCenter = hasDeviceCenter();
+  useEffect(() => { if (deviceCenter) return connectDeviceTheme(); }, [deviceCenter]);
+  if (deviceCenter) return <DeviceCenter />;
   return <SingleWorkbenchEntry />;
 }
 function SingleWorkbenchEntry() {

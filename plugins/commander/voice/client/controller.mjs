@@ -84,7 +84,7 @@ export function createVoiceController(ctx,deps={}) {
       if(!inputActions.insertText(text,span)){draftConflict=true;patch({error:'草稿已被修改，请复制语音栏转录文字后插入',transcript:text});return;}
       inserted=text;const next=inputActions.captureInsertion();span={start:span.start,end:span.start+text.length,draftRev:next.draftRev};inputActions.persistDraft();
     };
-    const realtime=['step-websocket','openai-websocket'].includes(config.asr.protocol)?new RealtimeRecognizer({request,endpoint:url,headers:callHeaders,onError:error=>{if(gen===generation){fail(error);void api.hangup();}}}):null;
+    const realtime=['step-websocket','openai-websocket'].includes(config.asr.protocol)?new RealtimeRecognizer({request,endpoint:url,headers:callHeaders,openSocket:path=>ctx.connection.openWebSocket(path),onWarning:warning=>{if(gen===generation)patch({error:warning.message});},onError:error=>{if(gen===generation){fail(error);void api.hangup();}}}):null;
     if(realtime){createdCapture={dispose:()=>realtime.close()};capture=createdCapture;await realtime.start();if(gen!==generation){await realtime.close();return;}}
     createdCapture=makeCapture({realtime,parallel:['transcriptions-sse','mimo-sse','step-sse'].includes(config.asr.protocol),workletURL:url('api/voice/worklet'),transcribe:async(blob,signal,onPartial)=>{
       const response=await request(url('api/voice/transcribe'),{method:'POST',credentials:'same-origin',signal,headers:{'content-type':'audio/wav',...callHeaders()},body:blob});

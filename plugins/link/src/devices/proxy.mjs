@@ -1,12 +1,12 @@
 import { createServer } from 'node:http';
-import { WebSocketServer } from 'ws';
+import { WebSocket, WebSocketServer } from 'ws';
 import { request } from 'node:https';
 import { readFile } from 'node:fs/promises';
 import { randomBytes, createHash } from 'node:crypto';
 import { remoteAgent, remoteJson } from './remote.mjs';
 const secret = () => randomBytes(32).toString('base64url');
 /** Each host has its own origin. Remote scripts cannot read the device centre. */
-export async function createDeviceProxy(target, { parentOrigin, onFailure, webRoot } = {}) {
+export async function createDeviceProxy(target, { parentOrigin, onFailure, webRoot, publicOrigin, publicPrefix = '' } = {}) {
   const agent = remoteAgent(target), tickets = new Map(), sessions = new Set(), sockets = new Set();
   let origin, remoteCookie, closed = false;
   const upstream = async () => {
@@ -26,11 +26,11 @@ export async function createDeviceProxy(target, { parentOrigin, onFailure, webRo
         if (!expires || expires < Date.now()) throw Object.assign(new Error('工作台入口已过期，请重新选择设备'), { status: 401 });
         const token = sessions.values().next().value || secret(); sessions.add(token);
         if (sessions.size > 16) sessions.delete(sessions.values().next().value);
-        res.writeHead(303, { location: '/s/' + token + '/link/workbench/', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' }); res.end(); return;
+        res.writeHead(303, { location: publicPrefix + '/s/' + token + '/link/workbench/', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' }); res.end(); return;
       }
       const match = url.pathname.match(/^\/s\/([A-Za-z0-9_-]{43})(\/.*)$/);
       if (!match || !sessions.has(match[1]) || req.headers.origin && req.headers.origin !== origin) throw Object.assign(new Error('设备工作台未授权'), { status: 403 });
-      const prefix = '/s/' + match[1]; url.pathname = match[2];
+      const prefix = publicPrefix + '/s/' + match[1]; url.pathname = match[2];
       if (url.pathname === '/local-proxy.js' && req.method === 'GET') { res.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-store' }); res.end('globalThis.__DSH_LINK_LOCAL_PROXY__=true;'); return; }
       if (webRoot && url.pathname === '/link/workbench/workbench.js' && req.method === 'GET') { res.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-store' }); res.end(await readFile(new URL('workbench.js', webRoot))); return; }
       if (!url.pathname.startsWith('/link/workbench/') || !['GET', 'HEAD', 'POST'].includes(req.method)) throw Object.assign(new Error('路径未授权'), { status: 403 });
@@ -51,7 +51,7 @@ export async function createDeviceProxy(target, { parentOrigin, onFailure, webRo
         if (String(outgoing['content-type']).startsWith('text/html')) {
           const chunks = []; let bytes = 0;
           response.on('data', chunk => { bytes += chunk.length; if (bytes > 8 * 1024 * 1024) response.destroy(new Error('工作台页面过大')); else chunks.push(chunk); });
-          response.on('end', () => { if (res.destroyed) return; const html = Buffer.concat(chunks).toString().replaceAll('/link/workbench/', prefix + '/link/workbench/').replace('<head>', '<head><script src="' + prefix + '/local-proxy.js"></script>'); const hashes = [...html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)].map(match => "'sha256-" + createHash('sha256').update(match[1]).digest('base64') + "'"); if (outgoing['content-security-policy']) { outgoing['content-security-policy'] = outgoing['content-security-policy'].replace(/'sha256-[^']+'/g, '').replace(/script-src([^;]*)/, (_, rules) => 'script-src' + rules + ' ' + hashes.join(' ')).replace(/connect-src([^;]*)/, (_, rules) => 'connect-src' + rules + ' ' + origin.replace('http:', 'ws:')); } delete outgoing['content-length']; res.writeHead(response.statusCode, outgoing); res.end(html); });
+          response.on('end', () => { if (res.destroyed) return; const html = Buffer.concat(chunks).toString().replaceAll('/link/workbench/', prefix + '/link/workbench/').replace('<head>', '<head><script src="' + prefix + '/local-proxy.js"></script>'); const hashes = [...html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)].map(match => "'sha256-" + createHash('sha256').update(match[1]).digest('base64') + "'"); if (outgoing['content-security-policy']) { outgoing['content-security-policy'] = outgoing['content-security-policy'].replace(/'sha256-[^']+'/g, '').replace(/script-src([^;]*)/, (_, rules) => 'script-src' + rules + ' ' + hashes.join(' ')).replace(/connect-src([^;]*)/, (_, rules) => 'connect-src' + rules + ' ' + (publicOrigin || origin).replace(/^http/, 'ws')); } delete outgoing['content-length']; res.writeHead(response.statusCode, outgoing); res.end(html); });
         } else { res.writeHead(response.statusCode, outgoing); response.pipe(res); }
         response.on('error', error => res.destroy(error));
       });
@@ -63,9 +63,41 @@ export async function createDeviceProxy(target, { parentOrigin, onFailure, webRo
   });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
   const activeSockets = new Set();
+  const voiceSockets = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false });
+  const bridgeVoice = ws => {
+    activeSockets.add(ws);
+    const endpoint = new URL('/link/workbench/api/voice/realtime', target.url);
+    endpoint.protocol = 'wss:';
+    const remote = new WebSocket(endpoint, { agent, origin: new URL(target.url).origin, headers: { cookie: remoteCookie }, handshakeTimeout: 10000, maxPayload: 64 * 1024, perMessageDeflate: false });
+    const pending = []; let bytes = 0, ended = false;
+    const stop = error => {
+      if (ended) return;
+      ended = true; pending.length = 0; bytes = 0; activeSockets.delete(ws);
+      if (error) onFailure?.(error);
+      if (ws.readyState !== WebSocket.CLOSED) ws.terminate();
+      if (remote.readyState !== WebSocket.CLOSED) remote.terminate();
+    };
+    const send = (destination, data, binary) => {
+      if (destination.readyState !== WebSocket.OPEN || destination.bufferedAmount + data.length > 64 * 1024) { stop(new Error('实时语音缓冲区已满')); return; }
+      destination.send(data, { binary }, error => { if (error) stop(error); });
+    };
+    ws.on('message', (data, binary) => {
+      if (ended) return;
+      if (remote.readyState === WebSocket.CONNECTING) {
+        if (bytes + data.length > 64 * 1024 || pending.length >= 40) { stop(new Error('实时语音连接尚未就绪')); return; }
+        pending.push({ data, binary }); bytes += data.length;
+      } else send(remote, data, binary);
+    });
+    remote.once('open', () => { for (const item of pending) { if (ended) break; send(remote, item.data, item.binary); } pending.length = 0; bytes = 0; });
+    remote.on('message', (data, binary) => { if (!ended) send(ws, data, binary); });
+    ws.on('error', stop); remote.on('error', stop);
+    ws.once('close', () => stop()); remote.once('close', () => stop());
+  };
   server.on('upgrade', (req, socket, head) => {
-    const match = req.url?.match(/^\/s\/([A-Za-z0-9_-]{43})\/socket$/);
+    socket.on('error', () => {});
+    const match = req.url?.match(/^\/s\/([A-Za-z0-9_-]{43})(\/socket|\/link\/workbench\/api\/voice\/realtime)$/);
     if (closed || req.headers.host !== new URL(origin).host || req.headers.origin !== origin || !match || !sessions.has(match[1])) { socket.destroy(); return; }
+    if (match[2] === '/link/workbench/api/voice/realtime') { voiceSockets.handleUpgrade(req, socket, head, bridgeVoice); return; }
     wss.handleUpgrade(req, socket, head, ws => {
       activeSockets.add(ws); const requests = new Map();
       const send = data => { if (ws.readyState === 1) { if (ws.bufferedAmount > 8 * 1024 * 1024) ws.terminate(); else ws.send(JSON.stringify(data)); } };
@@ -100,7 +132,7 @@ export async function createDeviceProxy(target, { parentOrigin, onFailure, webRo
   origin = 'http://127.0.0.1:' + server.address().port;
   return {
     origin,
-    async enter() { await upstream(); for (const [ticket, expires] of tickets) if (expires < Date.now()) tickets.delete(ticket); const ticket = secret(); tickets.set(ticket, Date.now() + 60000); return origin + '/enter?ticket=' + ticket; },
-    async close() { closed = true; for (const ws of activeSockets) ws.terminate(); wss.close(); tickets.clear(); sessions.clear(); agent.destroy(); const done = new Promise(resolve => server.close(resolve)); for (const socket of sockets) socket.destroy(); await done; },
+    async enter() { await upstream(); for (const [ticket, expires] of tickets) if (expires < Date.now()) tickets.delete(ticket); const ticket = secret(); tickets.set(ticket, Date.now() + 60000); return (publicOrigin || origin) + publicPrefix + '/enter?ticket=' + ticket; },
+    async close() { closed = true; for (const ws of activeSockets) ws.terminate(); wss.close(); voiceSockets.close(); tickets.clear(); sessions.clear(); agent.destroy(); const done = new Promise(resolve => server.close(resolve)); for (const socket of sockets) socket.destroy(); await done; },
   };
 }

@@ -1,6 +1,13 @@
 const statuses = { online: '可连接', connected: '已连接', offline: '离线', connecting: '连接中', failed: '连接失败', disconnected: '未连接', unknown: '未检测' };
 export function deviceStatus(device) { return statuses[device?.status] || '未检测'; }
-export function deviceKind(device) { return device?.kind === 'ssh' ? '服务器' : device?.kind === 'local' ? '本机' : '电脑'; }
+export function deviceIcon(device) {
+  const type = device?.deviceType || device?.kind;
+  if (['mobile', 'phone', 'android', 'ios', 'tablet'].includes(type)) return 'mobile';
+  if (['ssh', 'server'].includes(type)) return 'server';
+  if (['local', 'computer', 'desktop', 'laptop'].includes(type)) return 'computer';
+  return 'devices';
+}
+export function deviceKind(device) { return device?.kind === 'local' ? '本机' : ({ computer: '电脑', mobile: '移动设备', server: '服务器', devices: '设备' })[deviceIcon(device)]; }
 export function jobFinished(job) { return ['ready', 'done', 'completed', 'succeeded', 'success', 'failed', 'error'].includes(job?.state); }
 export function jobFailed(job) { return ['failed', 'error'].includes(job?.state); }
 export function sshInput(form) {

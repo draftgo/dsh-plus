@@ -8,6 +8,21 @@ import { createDeviceProxy } from './proxy.mjs';
 import { createServerManager } from '../server/manager.mjs';
 const secret = () => randomBytes(32).toString('base64url');
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
+export function parsePairingUri(input) {
+  let uri; try { uri = new URL(input); } catch { throw fail('请粘贴完整 Link 配对地址'); }
+  let target, code;
+  if (uri.protocol === 'dshlink:' && uri.hostname === 'pair') {
+    target = normalizeTarget({ url: uri.searchParams.get('url'), pin: uri.searchParams.get('pin') });
+    code = uri.searchParams.get('code');
+  } else if (uri.protocol === 'https:' && !uri.username && !uri.password && uri.pathname === '/link/' && !uri.search) {
+    target = normalizeTarget({ url: uri.origin });
+    const fragment = new URLSearchParams(uri.hash.slice(1));
+    if ([...fragment.keys()].some(key => key !== 'code') || fragment.getAll('code').length !== 1) throw fail('请粘贴完整 Link 配对地址');
+    code = fragment.get('code');
+  } else throw fail('请粘贴完整 Link 配对地址');
+  if (!code || code.length > 256) throw fail('配对码无效');
+  return { target, code };
+}
 async function body(req) {
   if (!req.headers['content-type']?.startsWith('application/json')) throw fail('需要 application/json', 415);
   let bytes = 0; const chunks = [];
@@ -15,7 +30,7 @@ async function body(req) {
   const input = JSON.parse(Buffer.concat(chunks).toString());
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw fail('请求必须是对象'); return input;
 }
-export async function createDeviceCenter({ directory, webRoot, managerFactory = createServerManager }) {
+export async function createDeviceCenter({ directory, webRoot, managerFactory = createServerManager, hostAdmin, publicOrigin, workbenchOrigin, registerProxy }) {
   const registry = await openDeviceRegistry(directory), pending = new Map(), proxies = new Map(), tickets = new Map(), sessions = new Map(), parents = new Set(), sockets = new Set();
   let origin, closed = false;
   const manager = await managerFactory({ directory, runtimeRoot: new URL('../server/', webRoot), onDevice: async device => {
@@ -26,14 +41,17 @@ export async function createDeviceCenter({ directory, webRoot, managerFactory = 
   const idOf = input => input.deviceId || input.targetId || input.id;
   const api = async input => {
     const id = idOf(input);
-    if (input.action === 'list') return { ...registry.list(), capabilities: { ssh: Boolean(manager) } };
+    if (input.action === 'list') return { ...registry.list(), capabilities: { ssh: Boolean(manager), hostAdmin: typeof hostAdmin === 'function' } };
+    const hostActions = { hostCloudAccess: 'cloud-access', hostStatus: 'status', hostConfigure: 'configure', hostPairing: 'pairing', hostConfirm: 'confirm', hostReject: 'reject', hostRevoke: 'revoke' };
+    if (Object.hasOwn(hostActions, input.action)) {
+      if (typeof hostAdmin !== 'function') throw fail('此客户端不支持本机连接管理，请更新应用');
+      const fields = { hostCloudAccess: ['operation', 'key'], hostStatus: [], hostConfigure: ['enabled', 'host', 'port', 'publicUrl'], hostPairing: ['mode', 'address'], hostConfirm: ['id'], hostReject: ['id'], hostRevoke: ['id'] }[input.action];
+      return hostAdmin({ action: hostActions[input.action], ...Object.fromEntries(fields.filter(key => Object.hasOwn(input, key)).map(key => [key, input[key]])) });
+    }
     if (input.action === 'pair') {
       for (const [key, item] of pending) if (item.expiresAt < Date.now()) pending.delete(key);
       if (pending.size >= 16) throw fail('配对请求过多');
-      const uri = new URL(input.uri);
-      if (uri.protocol !== 'dshlink:' || uri.hostname !== 'pair') throw fail('请粘贴完整 Link 配对地址');
-      const target = normalizeTarget({ url: uri.searchParams.get('url'), pin: uri.searchParams.get('pin') });
-      const code = uri.searchParams.get('code'); if (!code || code.length > 256) throw fail('配对码无效');
+      const { target, code } = parsePairingUri(input.uri);
       const { value } = await remoteJson(target, '/link/api/pair', { code, name: input.name || hostname().slice(0, 100) });
       const requestId = randomUUID();
       pending.set(requestId, { ...target, remote: value, expiresAt: Math.min(value.expiresAt || Date.now() + 300000, Date.now() + 300000) });
@@ -49,10 +67,17 @@ export async function createDeviceCenter({ directory, webRoot, managerFactory = 
     }
     if (input.action === 'select') {
       if (id === 'local') return { device: await registry.select(id), url: null };
+      if (publicOrigin && !workbenchOrigin) throw fail('请先配置独立 HTTPS 工作台域名，云端连接不能使用本机地址', 409);
       const target = registry.get(id);
       let proxy = proxies.get(id);
       try {
-        if (!proxy) { proxy = await createDeviceProxy(target, { webRoot, parentOrigin: [origin, ...parents].join(' '), onFailure: error => registry.mark(id, 'offline', error.message) }); proxies.set(id, proxy); }
+        if (!proxy) {
+          const published = publicOrigin ? registerProxy() : null;
+          try {
+            proxy = await createDeviceProxy(target, { webRoot, ...(published ? { publicOrigin: workbenchOrigin, publicPrefix: published.prefix } : {}), parentOrigin: [origin, publicOrigin, ...parents].filter(Boolean).join(' '), onFailure: error => registry.mark(id, 'offline', error.message) });
+            published?.attach(proxy); proxies.set(id, proxy);
+          } catch (error) { published?.remove(); throw error; }
+        }
         const url = await proxy.enter(); registry.mark(id, 'online'); return { device: await registry.select(id), url };
       } catch (error) { registry.mark(id, 'offline', error.message); throw error; }
     }
@@ -76,7 +101,7 @@ export async function createDeviceCenter({ directory, webRoot, managerFactory = 
         if (!value || value.expires < Date.now()) throw fail('设备入口已过期，请从侧栏重新打开', 401);
         const token = secret(); sessions.set(token, value.parentOrigin); if (sessions.size > 16) sessions.delete(sessions.keys().next().value);
         if (value.parentOrigin) parents.add(value.parentOrigin);
-        res.writeHead(303, { ...headers, location: '/s/' + token + '/' }); res.end(); return;
+        res.writeHead(303, { ...headers, location: (publicOrigin ? '/devices' : '') + '/s/' + token + '/' }); res.end(); return;
       }
       const match = url.pathname.match(/^\/s\/([A-Za-z0-9_-]{43})(\/.*)$/);
       if (!match || !sessions.has(match[1])) throw fail('设备中心未授权', 401);
@@ -85,7 +110,7 @@ export async function createDeviceCenter({ directory, webRoot, managerFactory = 
         res.writeHead(200, { ...headers, 'content-type': 'text/javascript' }); res.end('globalThis.__DSH_DEVICE_CENTER__=true;globalThis.__DSH_DEVICE_PARENT_ORIGIN__=' + JSON.stringify(sessions.get(match[1])) + ';'); return;
       }
       if (req.method === 'POST' && url.pathname === '/api/devices') {
-        if (req.headers.origin !== origin) throw fail('来源未授权', 403);
+        if (![origin, publicOrigin].filter(Boolean).includes(req.headers.origin)) throw fail('来源未授权', 403);
         const value = await api(await body(req)); res.writeHead(200, { ...headers, 'content-type': 'application/json' }); res.end(JSON.stringify(value)); return;
       }
       if (req.method !== 'GET') throw fail('不支持的方法', 405);
@@ -93,7 +118,7 @@ export async function createDeviceCenter({ directory, webRoot, managerFactory = 
       if (!file) throw fail('未找到', 404);
       let data = await readFile(new URL(file, webRoot));
       if (file === 'index.html') data = Buffer.from(data.toString().replace('<head>', '<head><script src="./device-config.js"></script>'));
-      const policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src http://127.0.0.1:*; connect-src 'self'; frame-ancestors " + ([...parents, 'dsh-app:'].join(' ')) + "; base-uri 'none'; form-action 'self'";
+      const policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src " + (publicOrigin ? (workbenchOrigin || "'none'") : 'http://127.0.0.1:*') + "; connect-src 'self'; frame-ancestors " + ([...parents, 'dsh-app:'].join(' ')) + "; base-uri 'none'; form-action 'self'";
       res.writeHead(200, { ...headers, 'content-type': file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html; charset=utf-8', 'content-security-policy': policy }); res.end(data);
     } catch (error) { if (!res.headersSent) res.writeHead(error.status || 400, { ...headers, 'content-type': 'application/json' }); res.end(JSON.stringify({ error: error.message })); }
   });
@@ -102,7 +127,7 @@ export async function createDeviceCenter({ directory, webRoot, managerFactory = 
   origin = 'http://127.0.0.1:' + server.address().port;
   return {
     origin, api,
-    launch(parentOrigin) { for (const [key, value] of tickets) if (value.expires < Date.now()) tickets.delete(key); const ticket = secret(); tickets.set(ticket, { expires: Date.now() + 60000, parentOrigin }); return { url: origin + '/enter?ticket=' + ticket }; },
+    launch(parentOrigin) { for (const [key, value] of tickets) if (value.expires < Date.now()) tickets.delete(key); const ticket = secret(); tickets.set(ticket, { expires: Date.now() + 60000, parentOrigin }); return { url: (publicOrigin || origin) + (publicOrigin ? '/devices' : '') + '/enter?ticket=' + ticket }; },
     async close() { closed = true; tickets.clear(); sessions.clear(); await Promise.all([...proxies.values()].map(proxy => proxy.close())); await manager?.close(); await registry.flush(); const done = new Promise(resolve => server.close(resolve)); sockets.forEach(socket => socket.destroy()); await done; },
   };
 }

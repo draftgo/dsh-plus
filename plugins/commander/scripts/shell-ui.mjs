@@ -8,6 +8,13 @@ export function shellUi(){return {name:'commander-shell-ui',setup(build){
   build.onLoad({filter:/ui-settings-general[\\/]src[\\/]client[\\/]SettingsRoot\.tsx$/},async({path})=>{
     let source=(await readFile(path,'utf8')).replaceAll('\r\n','\n');
     source=once(source,'className={css.overlay} role="presentation"', "className={css.overlay + ' cmd-settings-overlay'} role=\"presentation\"");
+    // The official row expects one account trigger. Plus provides six tools,
+    // so native update/reconnect actions need a separate row above that group.
+    source=once(source,'className={clsx(css.triggerRow, !wide && css.railRow)}', "className={clsx(css.triggerRow, !wide && css.railRow, 'cmd-sidebar-footer')}");
+    const status=source.match(/        <ConnectionIndicator\n[\s\S]*?          t=\{t\} view=\{desktopUpdate\} onOpen=\{openDesktopUpdate\} \/>/u)?.[0];
+    if(!status)throw Error('Official settings status controls changed');
+    source=once(source,status,'');
+    source=once(source,"        {renderSlot('settings.launcher', {", '        <div className="cmd-sidebar-status">\n'+status+'\n        </div>\n'+"        {renderSlot('settings.launcher', {");
     source=once(source,'function navIcon(id: string) {',
       'function navIcon(id: string) {\n'+
       '  if (id === "link") return <span className={css.navIcon} style={{ display: "inline-flex", width: 16, height: 16 }} aria-hidden="true" dangerouslySetInnerHTML={{ __html: '+JSON.stringify(linkIcon)+' }} />\n'+

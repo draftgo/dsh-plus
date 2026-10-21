@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
+import { WebSocketServer } from 'ws';
 
 export const WORKBENCH_PATH = '/link/workbench/';
 const COOKIE = 'dsh_link_workbench';
@@ -52,6 +53,7 @@ async function writeChunk(res, chunk, signal) {
 /** Same installed UI and Gateway, admitted exclusively by a paired device. */
 export function createWorkbench(ctx, store, { webRoot, workbenchRoot } = {}) {
   const cookies = new Map(), peers = new Map();
+  const realtime = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false });
   let closed = false;
   const authenticate = req => {
     const cookie = req.headers.cookie?.split(';').map(row => row.trim()).find(row => row.startsWith(COOKIE + '='))?.slice(COOKIE.length + 1);
@@ -67,7 +69,7 @@ export function createWorkbench(ctx, store, { webRoot, workbenchRoot } = {}) {
     let record = peers.get(device.id);
     if (!record) {
       if (peers.size >= 32) throw fail('连接设备过多', 429);
-      record = { peer: ctx.connection.createPeer({ principal: { kind: 'owner' }, interactions: 'answer' }), abort: new AbortController(), streams: new Map() };
+      record = { peer: ctx.connection.createPeer({ principal: { kind: 'owner' }, interactions: 'answer' }), abort: new AbortController(), streams: new Map(), realtime: new Set() };
       peers.set(device.id, record);
     }
     return record;
@@ -77,8 +79,24 @@ export function createWorkbench(ctx, store, { webRoot, workbenchRoot } = {}) {
     const record = peers.get(id);
     if (!record) return;
     peers.delete(id); record.abort.abort();
+    for (const ws of record.realtime) ws.terminate();
+    record.realtime.clear();
     for (const stream of record.streams.values()) { stream.abort.abort(); stream.wake?.(); }
     await record.peer.dispose();
+  };
+  const upgrade = (req, socket, head) => {
+    if (closed) throw fail('Link 已关闭', 503);
+    const device = authenticate(req);
+    if (!device) throw fail('设备授权已失效，请重新配对', 401);
+    const voice = ctx.get('voice');
+    if (typeof voice?.acceptRealtimeSocket !== 'function') throw fail('实时语音尚未就绪', 503);
+    const record = peerFor(device);
+    realtime.handleUpgrade(req, socket, head, ws => {
+      record.realtime.add(ws);
+      ws.on('error', () => {});
+      ws.once('close', () => record.realtime.delete(ws));
+      try { voice.acceptRealtimeSocket(ws); } catch { ws.terminate(); }
+    });
   };
   const begin = (device, res) => {
     if (closed) throw fail('Link 已关闭', 503);
@@ -209,5 +227,5 @@ export function createWorkbench(ctx, store, { webRoot, workbenchRoot } = {}) {
       res.end(req.method === 'HEAD' ? undefined : data);
     } finally { record.abort.signal.removeEventListener('abort', onAbort); res.off('close', onClose); }
   };
-  return { begin, handle, revoke, close: async () => { closed = true; await Promise.all([...peers.keys()].map(revoke)); cookies.clear(); } };
+  return { begin, handle, upgrade, revoke, close: async () => { closed = true; await Promise.all([...peers.keys()].map(revoke)); realtime.close(); cookies.clear(); } };
 }

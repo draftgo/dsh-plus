@@ -19,7 +19,7 @@ test('TTS cancel aborts synthesis without waiting for uncooperative provider',as
 });
 test('TTS queue rejects excess backlog',async()=>{const errors=[];const q=new SpeechQueue({maxQueued:2,player:{clear(){}},synthesize:()=>new Promise(()=>{}),onError:e=>errors.push(e)});assert.equal(q.push('one'),true);assert.equal(q.push('two'),true);assert.equal(q.push('three'),false);assert.equal(errors.length,1);await q.dispose();});
 test('idle chunking flushes safe clauses without splitting decimals or unfinished English words',()=>{
-  let now=1000;const c=new SpeakableChunker({now:()=>now});c.push('我会帮你检查这些配置，正在继续确认');now+=750;assert.deepEqual(c.flushIdle(),['我会帮你检查这些配置，']);const c2=new SpeakableChunker({now:()=>now});c2.push('approximately 3.14');now+=750;assert.deepEqual(c2.flushIdle(),['approximately']);assert.deepEqual(c2.finish(),['3.14']);const c3=new SpeakableChunker({now:()=>now});c3.push('G');now+=1500;assert.deepEqual(c3.flushIdle(),[]);c3.push('rok');assert.deepEqual(c3.finish(),['Grok']);
+  let now=1000;const c=new SpeakableChunker({now:()=>now});assert.deepEqual(c.push('我会帮你检查这些配置，正在继续确认'),['我会帮你检查这些配置，']);now+=750;assert.deepEqual(c.flushIdle(),[]);assert.deepEqual(c.finish(),['正在继续确认']);const c2=new SpeakableChunker({now:()=>now});c2.push('approximately 3.14');now+=750;assert.deepEqual(c2.flushIdle(),['approximately']);assert.deepEqual(c2.finish(),['3.14']);const c3=new SpeakableChunker({now:()=>now});c3.push('G');now+=1500;assert.deepEqual(c3.flushIdle(),[]);c3.push('rok');assert.deepEqual(c3.finish(),['Grok']);
 });
 test('prefetched TTS bodies are consumed concurrently but have bounded PCM queues',async()=>{
   let firstFinish;const first=new ReadableStream({start(c){c.enqueue(new Uint8Array([1,0]));firstFinish=()=>c.close();}}),sent=[];
@@ -50,4 +50,24 @@ test('unterminated code and Markdown links have bounded retained text', () => {
   assert.ok(code.raw.length <= 8); assert.ok(code.text.length <= 120); assert.doesNotMatch(code.finish().join(''), /PrivateCode/u);
   const link = new SpeakableChunker(); link.push('[文档]('); for (let i = 0; i < 1000; i++) link.push('private-link-destination');
   assert.ok(link.raw.length <= 2048); assert.doesNotMatch(link.finish().join(''), /private-link/u);
+});
+test('confirmed punctuation starts speech in the same delta without an idle timer', () => {
+  const short=new SpeakableChunker();assert.deepEqual(short.push('你好。'),['你好。']);
+  const first=new SpeakableChunker();assert.deepEqual(first.push('我会先检查你的语音配置，'),['我会先检查你的语音配置，']);
+  assert.deepEqual(first.push('再核对实际请求，'),[]);
+  assert.equal(first.finish().join(''),'再核对实际请求，');
+  const number=new SpeakableChunker();assert.deepEqual(number.push('The total amount is 123,456.78'),[]);assert.equal(number.finish().join(''),'The total amount is 123,456.78');
+  const privateText=filterChunks('我会先确认你的语音配置，<reasoning>绝不能朗读。</reasoning>请看 https://private.example/path 完成。');
+  assert.doesNotMatch(privateText,/绝不能|private|https/u);assert.match(privateText,/完成/u);
+});
+test('arriving PCM is forwarded immediately without a per-packet coalescing timer',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  let stream,firstPlayed;const played=[];const started=new Promise(resolve=>firstPlayed=resolve);
+  const q=new SpeechQueue({player:{enqueue:async bytes=>{played.push([...bytes]);firstPlayed();},segmentEnd(){},clear(){}},synthesize:async()=>new Response(new ReadableStream({start(controller){stream=controller;controller.enqueue(new Uint8Array([1,0]));}}))});
+  try{q.push('one');await started;stream.enqueue(new Uint8Array([2,0]));for(let i=0;i<20;i++)await Promise.resolve();assert.deepEqual(played,[[1,0],[2,0]]);stream.close();await q.finish();}finally{await q.dispose();t.mock.timers.reset();}
+});
+test('dispose releases local readers when a provider never finishes cancelling', {timeout:1000},async()=>{
+  let signal,started;const ready=new Promise(resolve=>started=resolve);let cancelled=0;
+  const q=new SpeechQueue({player:{enqueue:async()=>started(),segmentEnd(){},clear(){}},synthesize:async(_text,abort)=>{signal=abort;return new Response(new ReadableStream({start(controller){controller.enqueue(new Uint8Array([1,0]));},cancel(){cancelled++;return new Promise(()=>{});}}));}});
+  q.push('one');await ready;await q.dispose();assert.equal(signal.aborted,true);assert.equal(cancelled,1);assert.equal(q.controllers.size,0);assert.equal(q.readers.size,0);assert.deepEqual(q.items,[]);
 });

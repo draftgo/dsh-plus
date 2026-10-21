@@ -93,6 +93,10 @@ test('wide and rail footer keep shortcuts ordered and open GitHub in the externa
     assert.equal(tree.props.className.includes('cmd-settings-row-rail'), !wide);
     const github = children.at(-1);
     assert.equal(github.props.label, 'GitHub');
+    for (const child of [children[0], children.at(-2), github]) {
+      assert.equal(child.props.side, 'top');
+      assert.equal(child.props.gap, 10);
+    }
     const button = github.props.children;
     assert.equal(button.type, 'button');
     assert.equal(button.props.type, 'button');

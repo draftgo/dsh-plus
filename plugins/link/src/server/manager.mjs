@@ -4,6 +4,8 @@ import { createServer, isIP } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ssh2 from 'ssh2';
+import { request } from 'node:https';
+import { remoteAgent, remoteJson } from '../devices/remote.mjs';
 const { Client } = ssh2;
 export const fingerprintOf = key => 'SHA256:' + createHash('sha256').update(key).digest('base64').replace(/=+$/, '');
 export const shellQuote = value => "'" + String(value).replaceAll("'", "'\\''") + "'";
@@ -82,6 +84,24 @@ export async function openSshTunnel(client, remotePort) {
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   return { url: 'https://127.0.0.1:' + server.address().port, close: async () => { for (const socket of sockets) socket.destroy(); await new Promise(resolve => server.close(resolve)); } };
 }
+/** Verify TLS identity, authorization and the actual workbench before registration. */
+export async function verifyServerWorkbench(target) {
+  const agent = remoteAgent(target);
+  try {
+    const { value, headers } = await remoteJson(target, '/link/api/workbench', {}, { agent });
+    const cookie = headers['set-cookie']?.find(value => value.startsWith('dsh_link_workbench='))?.split(';')[0];
+    if (value?.url !== '/link/workbench/' || !cookie) throw new Error('服务器未返回有效工作台授权');
+    await new Promise((resolve, reject) => {
+      const req = request(new URL('/link/workbench/', target.url), { agent, timeout: 20000, headers: { cookie } }, res => {
+        let bytes = 0;
+        res.on('data', chunk => { bytes += chunk.length; if (bytes > 2 * 1024 * 1024) req.destroy(new Error('服务器工作台响应过大')); });
+        res.once('error', reject);
+        res.once('end', () => res.statusCode === 200 && /text\/html/i.test(res.headers['content-type'] ?? '') && bytes > 0 ? resolve() : reject(new Error('服务器工作台尚未就绪')));
+      });
+      req.once('error', reject); req.once('timeout', () => req.destroy(new Error('服务器工作台验证超时'))); req.end();
+    });
+  } finally { agent.destroy(); }
+}
 export function createServerManager({ directory, onDevice = async () => {}, runtimeRoot, assetsRoot, clientFactory = () => new Client() } = {}) {
   if (!directory) throw new Error('服务器管理目录未配置');
   const clients = new Set();
@@ -115,6 +135,8 @@ export function createServerManager({ directory, onDevice = async () => {}, runt
   }
   async function attach(client, device) {
     const tunnel = await openSshTunnel(client, device.ssh.remotePort); const previous = sessions.get(device.id);
+    try { await verifyServerWorkbench({ ...device, url: tunnel.url }); ensure(); }
+    catch (error) { await tunnel.close(); throw error; }
     const session = { client, tunnel }; sessions.set(device.id, session); device.url = tunnel.url; device.status = 'online'; delete device.lastError;
     const disconnect = () => { if (sessions.get(device.id) !== session) return; sessions.delete(device.id); tunnel.close().catch(() => {}); device.status = 'offline'; device.lastError = 'SSH 连接已断开，请重新连接'; Promise.resolve(onDevice(privateRecord(device))).catch(() => {}); };
     client.on('error', disconnect); client.on('close', disconnect);
@@ -132,12 +154,12 @@ export function createServerManager({ directory, onDevice = async () => {}, runt
       const known = [...records.values()].find(device => [device.ssh.host, device.ssh.port, device.ssh.username].join('|') === key);
       if (known) { if (known.ssh.fingerprint !== input.fingerprint) throw new Error('SSH 主机指纹已改变，已保留原连接'); return this.reconnect({ ...input, id: known.id, device: { name } }); }
       if (connecting.has(key)) throw new Error('此服务器正在连接'); connecting.add(key);
-      return startJob(async (_job, step) => { let client; try { client = await open(input); ensure(); step('检查与安装'); const result = await install(client, input, 'connect'); ensure(); step('建立安全隧道'); const previous = [...records.values()].find(device => [device.ssh.host, device.ssh.port, device.ssh.username].join('|') === key); return await attach(client, { id: previous?.id ?? randomUUID(), name, kind: 'ssh', pin: result.pin, token: result.token, ssh: { ...target, fingerprint: input.fingerprint, remotePort: result.port }, ...(result.warning ? { warning: result.warning } : {}) }); } catch (error) { client?.end(); throw error; } finally { connecting.delete(key); } });
+      return startJob(async (_job, step) => { let client; try { client = await open(input); ensure(); step('检查与安装'); const result = await install(client, input, 'connect'); ensure(); step('验证安全工作台'); const previous = [...records.values()].find(device => [device.ssh.host, device.ssh.port, device.ssh.username].join('|') === key); return await attach(client, { id: previous?.id ?? randomUUID(), name, kind: 'ssh', pin: result.pin, token: result.token, ssh: { ...target, fingerprint: input.fingerprint, remotePort: result.port }, ...(result.warning ? { warning: result.warning } : {}) }); } catch (error) { client?.end(); throw error; } finally { connecting.delete(key); } });
     },
     async reconnect(input) {
       ensure(); await ready; const device = records.get(input.id); if (device && input.device?.name) device.name = input.device.name; if (!device) throw new Error('未找到此服务器');
       const value = { ...device.ssh, password: input.password, privateKey: input.privateKey, passphrase: input.passphrase }; validateSshInput(value, { credentials: true });
-      return startJob(async (_job, step) => { const client = await open(value); try { ensure(); step('恢复安全隧道'); const channel = await new Promise((resolve, reject) => client.forwardOut('127.0.0.1', 0, '127.0.0.1', device.ssh.remotePort, (error, stream) => error ? reject(error) : resolve(stream))); channel.destroy(); return await attach(client, { ...device }); } catch (error) { client.end(); throw error; } });
+      return startJob(async (_job, step) => { const client = await open(value); try { ensure(); step('验证安全工作台'); const channel = await new Promise((resolve, reject) => client.forwardOut('127.0.0.1', 0, '127.0.0.1', device.ssh.remotePort, (error, stream) => error ? reject(error) : resolve(stream))); channel.destroy(); return await attach(client, { ...device }); } catch (error) { client.end(); throw error; } });
     },
     async job(id) { ensure(); const job = jobs.get(typeof id === 'string' ? id : id?.id); if (!job) throw new Error('任务已过期'); return structuredClone(job); },
     async manage(input) {

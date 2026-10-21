@@ -5,6 +5,8 @@ import { RealtimeASR } from './realtime.mjs';
 import { speechRequest } from './tts.mjs';
 import { CallLeases } from './calls.mjs';
 import { readFile } from 'node:fs/promises';
+import { WebSocketServer } from 'ws';
+import { createRealtimeSockets } from './realtime-socket.mjs';
 
 const headers = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
 export function assertSameOrigin(request) {
@@ -24,10 +26,11 @@ function scope(request, signals) {
 }
 export function createVoiceHandlers(store, { fetcher = fetch, shutdown = new AbortController().signal, providers, socket } = {}) {
   const active = { asr: 0, tts: 0 }, realtime = new RealtimeASR({ socket });
+  const sockets = createRealtimeSockets(realtime);
   const calls = new CallLeases(); let revision = 0, mediaGeneration = new AbortController();
-  const invalidate = () => { revision++; realtime.clear(); calls.clear(); mediaGeneration.abort(); mediaGeneration = new AbortController(); };
+  const invalidate = () => { revision++; sockets.clear(); realtime.clear(); calls.clear(); mediaGeneration.abort(); mediaGeneration = new AbortController(); };
   const unsubscribe = store.subscribe?.(invalidate);
-  const dispose = () => { unsubscribe?.(); realtime.clear(); calls.clear(); mediaGeneration.abort(); };
+  const dispose = () => { unsubscribe?.(); sockets.dispose(); realtime.clear(); calls.clear(); mediaGeneration.abort(); };
   shutdown.addEventListener('abort', dispose, { once: true });
   const errorResponse = error => Response.json({ error: error instanceof VoiceError ? error.message : 'Voice service request failed; check provider configuration and connectivity', ...(error instanceof VoiceError && error.code ? { code: error.code } : {}) }, { status: error instanceof VoiceError ? error.status : error?.name === 'AbortError' ? 499 : 502, headers });
   const protect = handler => async request => { try { assertSameOrigin(request); if (shutdown.aborted) throw new VoiceError('Voice service is stopping', 503); return await handler(request); } catch (error) { return errorResponse(error); } };
@@ -61,6 +64,7 @@ export function createVoiceHandlers(store, { fetcher = fetch, shutdown = new Abo
   const reserve = (request, feature, kind) => { const operation = operationFor(request, feature); try { return { operation, release: acquire(kind) }; } catch (error) { operation.close(); throw error; } };
   return {
     dispose,
+    acceptRealtimeSocket: sockets.accept,
     worklet: protect(async () => new Response(await readFile(new URL('../client/audio-worklet.js', import.meta.url)), { headers: { ...headers, 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'private, no-store' } })),
     config: protect(async request => {
       const input = await readJson(request);
@@ -73,17 +77,9 @@ export function createVoiceHandlers(store, { fetcher = fetch, shutdown = new Abo
         const signals = [shutdown, mediaGeneration.signal]; if (callId) signals.push(calls.media(callId));
         const release = acquire('asr'), opening = new AbortController(); signals.push(opening.signal);
         const abort = () => opening.abort(); request.signal.addEventListener('abort', abort, { once: true }); if (request.signal.aborted) abort();
-        try { const id = await realtime.open(config, AbortSignal.any(signals), callId); realtime.get(id, callId).onClose = release; return Response.json({ id }, { headers }); }
+        try { const id = await realtime.open(config, AbortSignal.any(signals), callId); realtime.get(id, callId).onClose = release; return Response.json({ id, ticket: sockets.issue(id, callId) }, { headers }); }
         catch (error) { release(); throw error; } finally { request.signal.removeEventListener('abort', abort); }
       }
-      if (input.action === 'asr.events') {
-        const id = input.id, callId = request.headers.get('x-voice-call-id') || ''; const stream = realtime.events(id, callId);
-        const abort = () => realtime.close(id); request.signal.addEventListener('abort', abort, { once: true });
-        const session = realtime.get(id, callId), previous = session.onClose; session.onClose = () => { request.signal.removeEventListener('abort', abort); previous?.(); };
-        if (request.signal.aborted) abort(); return new Response(stream, { headers: { ...headers, 'content-type': 'application/x-ndjson', 'x-accel-buffering': 'no' } });
-      }
-      if (input.action === 'asr.commit') { realtime.commit(input.id, request.headers.get('x-voice-call-id') || '', input.utteranceId); return Response.json({ ok: true }, { headers }); }
-      if (input.action === 'asr.clear') { await realtime.reset(input.id, request.headers.get('x-voice-call-id') || ''); return Response.json({ ok: true }, { headers }); }
       if (input.action === 'asr.end') { realtime.get(input.id, request.headers.get('x-voice-call-id') || ''); realtime.close(input.id); return Response.json({ ok: true }, { headers }); }
       if (input.action === 'config') return Response.json({ config: await snapshot() }, { headers });
       if (input.action === 'configure') { await store.configure(input.config); if (!unsubscribe) invalidate(); return Response.json({ config: await snapshot(), revision }, { headers }); }
@@ -91,12 +87,6 @@ export function createVoiceHandlers(store, { fetcher = fetch, shutdown = new Abo
       if (input.action === 'call.heartbeat') return Response.json({ call: calls.heartbeat(input), revision }, { headers });
       if (input.action === 'call.end') return Response.json(calls.end(input), { headers });
       throw new VoiceError('Unknown Voice action');
-    }),
-    realtimeAppend: protect(async request => {
-      if (request.headers.get('content-type')?.split(';')[0] !== 'application/octet-stream') throw new VoiceError('Expected raw PCM16 audio', 415);
-      const id = request.headers.get('x-voice-session-id'), callId = request.headers.get('x-voice-call-id') || '';
-      realtime.get(id, callId); const bytes = await readLimited(request, 24000);
-      realtime.append(id, callId, bytes, Number(request.headers.get('x-voice-utterance-id'))); return Response.json({ ok: true }, { headers });
     }),
     transcribe: protect(async request => {
       if (!store.value.dictation && !store.value.call) throw new VoiceError('Voice input is disabled', 409);
@@ -162,9 +152,20 @@ export function mountWeb(ctx, store, options = {}) {
   const shutdown = new AbortController();
   const handlers = createVoiceHandlers(store, { ...options, shutdown: shutdown.signal });
   ctx.effect(() => () => shutdown.abort());
-  for (const [path, handler] of [['/api/voice', handlers.config], ['/api/voice/transcribe', handlers.transcribe], ['/api/voice/speech', handlers.speech], ['/api/voice/realtime/audio', handlers.realtimeAppend]]) {
+  for (const [path, handler] of [['/api/voice', handlers.config], ['/api/voice/transcribe', handlers.transcribe], ['/api/voice/speech', handlers.speech]]) {
     ctx.effect(() => ctx.connection.fetch.register({ path, methods: ['POST'], requestBody: 'streaming', fetch: handler }));
   }
   ctx.effect(() => ctx.connection.fetch.register({ path: '/api/voice/worklet', methods: ['GET'], requestBody: 'buffered', fetch: handlers.worklet }));
+  store.acceptRealtimeSocket = handlers.acceptRealtimeSocket;
+  ctx.effect(() => () => { if (store.acceptRealtimeSocket === handlers.acceptRealtimeSocket) delete store.acceptRealtimeSocket; });
+  ctx.inject?.(['webServer'], child => {
+    const wss = new WebSocketServer({ noServer: true, maxPayload: 2048, perMessageDeflate: false });
+    child.effect(() => child.webServer.registerUpgrade({ path: '/api/voice/realtime', handler(req, socket, head) {
+      const rejection = child.connection.requestRejection(req);
+      if (rejection) { socket.end('HTTP/1.1 ' + rejection + ' Rejected\r\nConnection: close\r\n\r\n'); return; }
+      wss.handleUpgrade(req, socket, head, handlers.acceptRealtimeSocket);
+    } }));
+    child.effect(() => () => { for (const ws of wss.clients) ws.terminate(); wss.close(); });
+  });
   return handlers;
 }

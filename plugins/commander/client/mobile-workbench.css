@@ -3,20 +3,27 @@
 .cmd-shell-frame[data-plus-resizing] * { animation: none !important; transition: none !important; }
 
 /* The same workbench, settings slots and composer on a smaller canvas. */
+@media (any-pointer: coarse) {
+  /* Includes body portals used by menus and settings in the shared workbench. */
+  html { -webkit-tap-highlight-color: transparent; }
+  :is(button, a, summary, [role="button"], [tabindex]):not(input, textarea, select, [contenteditable]):focus:not(:focus-visible) {
+    outline: none;
+  }
+}
 @media (max-width: 767px) {
   html, body, #root { width: 100%; min-width: 0; overscroll-behavior: none; }
   #root { height: var(--cmd-mobile-viewport-height, 100dvh); }
   .cmd-shell-frame[data-plus-shell] {
     box-sizing: border-box; height: var(--cmd-mobile-viewport-height, 100dvh);
     grid-template-columns: 0 minmax(0, 1fr) 0 !important;
-    padding-top: calc(52px + env(safe-area-inset-top, 0px));
+    padding-top: env(safe-area-inset-top, 0px);
     --dsh-frame-top-clearance: 0px; --dsh-frame-leading-clearance: 0px;
     --dsh-frame-chrome-top: 0px; --dsh-frame-overlay-top: 12px;
   }
   .cmd-shell-frame[data-plus-shell] > :first-child {
-    position: absolute; inset: calc(52px + env(safe-area-inset-top, 0px)) auto 0 0; z-index: 40;
+    position: absolute; inset: calc(44px + env(safe-area-inset-top, 0px)) auto 0 0; z-index: 40;
     width: min(304px, 86vw); max-width: 100%;
-    /* The toolbar offset above already includes the top safe area. */
+    /* The resident title row already includes the top safe area. */
     padding-top: 0; box-sizing: border-box;
     background: var(--dsw-specific-sidebar-fill);
     visibility: visible; transform: translateX(0);
@@ -38,20 +45,28 @@
   .cmd-shell-sidebar:has(.cmd-projects),
   .cmd-shell-sidebar:has(.cmd-projects) * { animation: none !important; transition: none !important; }
   .cmd-mobile-workbench:not([hidden]) { display: contents; }
-  .cmd-mobile-toolbar {
-    position: absolute; z-index: 50; inset: 0 0 auto; display: flex; align-items: center; gap: 8px;
-    height: calc(52px + env(safe-area-inset-top, 0px)); box-sizing: border-box;
-    padding: env(safe-area-inset-top, 0px) 10px 0; pointer-events: auto;
-    background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary);
-    border-bottom: 0.5px solid var(--dsw-alias-border-l3);
+  .cmd-mobile-navigation {
+    display: flex; align-items: center; gap: 2px; flex: none;
+    min-height: 44px; padding-inline-end: 4px; color: var(--dsw-alias-label-primary);
   }
-  .cmd-mobile-toolbar > span { flex: 1; text-align: center; font-size: 14px; font-weight: 500; }
-  .cmd-mobile-toolbar > button {
+  .cmd-shell-frame[data-plus-shell]:has(.cmd-mobile-navigation-fallback) {
+    padding-top: calc(44px + env(safe-area-inset-top, 0px));
+  }
+  .cmd-mobile-navigation-fallback {
+    position: absolute; z-index: 50; inset: env(safe-area-inset-top, 0px) 0 auto;
+    padding-inline: max(6px, env(safe-area-inset-left, 0px));
+    background: var(--dsw-alias-bg-base); pointer-events: auto;
+  }
+  .cmd-mobile-navigation > button,
+  .cmd-mobile-device > button {
     display: inline-flex; align-items: center; justify-content: center; flex: none;
-    width: 44px; height: 44px; border: 0; border-radius: 12px; padding: 0;
+    width: 40px; height: 44px; min-width: 0; border: 0; border-radius: 10px; padding: 0;
     background: transparent; color: inherit; cursor: pointer; touch-action: manipulation;
   }
-  .cmd-mobile-toolbar > button:active { background: var(--dsw-alias-interactive-bg-hover); }
+  .cmd-mobile-device { display: flex; align-items: center; min-width: 0; }
+  .cmd-mobile-device > button { max-width: 94px; width: auto; padding-inline: 6px; gap: 4px; }
+  .cmd-mobile-navigation > button:active,
+  .cmd-mobile-device > button:active { background: var(--dsw-alias-interactive-bg-hover); }
   .cmd-mobile-sidebar-icon-open { transform: rotate(180deg); }
   .cmd-mobile-drawer-mask {
     position: absolute; inset: 0; z-index: 1; pointer-events: auto;
@@ -59,11 +74,18 @@
   }
   .cmd-shell-frame > :nth-child(2) { min-width: 0; grid-column: 2; grid-row: 1; }
   .cmd-shell-frame > [data-rightbar-col] { grid-column: 3; grid-row: 1; }
-  .cmd-shell-frame [data-conversation-header-leading] { display: none; }
+  .cmd-shell-frame [data-conversation-header-leading] { display: flex; min-width: 0; }
   .cmd-shell-frame header:has([data-conversation-header-leading]) {
-    padding-inline-start: max(12px, env(safe-area-inset-left, 0px));
-    padding-inline-end: max(12px, env(safe-area-inset-right, 0px));
+    position: relative; z-index: 30; padding-block-start: 0;
+    padding-inline-start: max(6px, env(safe-area-inset-left, 0px));
+    padding-inline-end: max(8px, env(safe-area-inset-right, 0px));
   }
+  .cmd-shell-frame header:has([data-conversation-header-leading]) > [class*="titleRow"] {
+    min-height: 44px; min-width: 0; padding-inline-start: 0;
+  }
+  .cmd-shell-frame header [class*="crumbCurrent"] { max-width: 100%; }
+  .cmd-shell-frame header [class*="titleCluster"] { min-width: 0; }
+  .cmd-shell-frame header [class*="headerUtilities"] { margin-inline-start: 4px; gap: 4px; }
   .cmd-shell-frame [data-conversation-header-corner] { margin-inline-end: 0; }
   .cmd-shell-frame [data-conversation-tabs] { overflow-x: auto; scrollbar-width: none; }
   .cmd-shell-frame [data-conversation-region="composer"] {
@@ -71,6 +93,46 @@
     --dsh-composer-side-clearance: 10px;
     --dsh-composer-text-max-height: min(240px, 35dvh);
   }
+  /* Only normal input controls: voice calls retain their expanded panel.
+     Shrink the text seats, never clip the whole operation group. */
+  .cmd-shell-frame [data-composer-card]:not(.voice-call-composer) > [class*="_row"] {
+    flex-wrap: nowrap; gap: 4px; padding-inline: 6px;
+    --dsh-composer-model-text-display: block;
+  }
+  .cmd-shell-frame [data-composer-card]:not(.voice-call-composer) [class*="_tools"],
+  .cmd-shell-frame [data-composer-card]:not(.voice-call-composer) [class*="_modes"] {
+    gap: 2px; min-width: 0; flex: 0 1 auto;
+  }
+  .cmd-shell-frame [data-composer-card]:not(.voice-call-composer) [class*="_tools"] { max-width: 36%; }
+  .cmd-shell-frame [data-composer-card]:not(.voice-call-composer) [class*="_modes"] > * { min-width: 0; }
+  .cmd-shell-frame [data-composer-card]:not(.voice-call-composer) [class*="_modes"] button {
+    min-width: 0; max-width: 100%; gap: 2px; padding-inline: 2px;
+  }
+  .cmd-shell-frame [data-composer-card]:not(.voice-call-composer) [class*="_trailing"] {
+    flex: 1 1 0; min-width: 0; gap: 4px;
+  }
+  .cmd-shell-frame [data-composer-card]:not(.voice-call-composer) [class*="_standardControls"] {
+    flex: 1 1 0; min-width: 0; gap: 2px;
+  }
+  .cmd-shell-frame [data-composer-card]:not(.voice-call-composer) [class*="_standardControls"][hidden] { display: none; }
+  .cmd-shell-frame [data-composer-card]:not(.voice-call-composer) .cmd-model-trigger {
+    width: 100%; max-width: 100%; flex: 1 1 0; min-width: 0; padding-inline: 2px; gap: 3px;
+  }
+  .cmd-shell-frame [data-composer-card]:not(.voice-call-composer) .cmd-model-caption { flex: 1 1 auto; }
+  .cmd-shell-frame [data-composer-card]:not(.voice-call-composer) [class*="_activity"]:has(.voice-activity:not(.voice-expanded)) {
+    flex: 0 1 auto; min-width: 90px; max-width: calc(100% - 44px);
+  }
+  .cmd-shell-frame [data-composer-card]:not(.voice-call-composer) .voice-activity:not(.voice-expanded) {
+    gap: 0; flex: 0 1 auto; min-width: 0;
+  }
+  .cmd-shell-frame [data-composer-card]:not(.voice-call-composer) .voice-inline-error,
+  .cmd-shell-frame [data-composer-card]:not(.voice-call-composer) .voice-inline-note {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .cmd-shell-frame [data-composer-card]:not(.voice-call-composer) .voice-recording-strip { gap: 4px; min-width: 0; padding-inline: 2px; }
+  .cmd-shell-frame [data-composer-card]:not(.voice-call-composer) .voice-recording-pulse { flex-basis: 90px; min-width: 44px; padding-inline: 2px; }
+  .cmd-shell-frame [data-composer-card]:not(.voice-call-composer) [class*="_primary"],
+  .cmd-shell-frame [data-composer-card]:not(.voice-call-composer) .voice-icon-button { flex: none; }
   .cmd-shell-frame [contenteditable="true"],
   :is(.cmd-shell-frame, [role="dialog"]) :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select) {
     font-size: max(16px, 1em); min-width: 0; max-width: 100%;

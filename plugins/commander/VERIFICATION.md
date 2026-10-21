@@ -12,7 +12,7 @@
 - Windows 39375681901 与发布 39378135760 成功；默认用户目录强杀后旧锁恢复、会话及原生句柄保留、新装、0.1.3 原位升级与实际插件 0.1.9 检查均通过。首轮失败包未发布；未给 smoke 增加重试绕过。
 - Android 39375686798 与插件包 39375691388 成功；Android 35/35 独立验收与持久签名连续性通过；插件 Ed25519、SHA256、源码及客户端核对通过，无 SSH 可选原生 ABI 产物。v0.1.7 / plugin-v0.1.9 及两个独立更新通道已公开，国内镜像与 GitHub 清单验签一致。
 - 默认国内镜像完整下载 EXE / 插件包 / APK，大小与 SHA256 全部通过；分片及临时验证脚本已清理，证据见 .local/release-0.1.7/full-mirror-verification.json。
-- 源码服务器已加载 0.1.9，14 条原会话保留，state/ensureRecent/updates 200、无自动重启，已最新时不再产生更新红点。实际 GUI / 真机自动更新未验收，Windows 未配置 Authenticode。详细摘要、产物哈希与边界见 Design/更新与发布.md。
+- 源码服务器已加载 0.1.9，14 条原会话保留，state/ensureRecent/updates 200、无自动重启，已最新时不再产生更新红点。实际 GUI / 真机自动更新未验收，Windows 未配置 Authenticode。详细摘要、产物哈希与边界见 Design/05-更新与发布/发布.md。
 
 ## 2026-10-20 0.1.7 发布门槛与启动就绪修正
 
@@ -257,7 +257,7 @@ node --test plugins/commander/test/commands.test.mjs plugins/commander/test/runt
 
 ## 2026-10-19 多设备与服务器接入
 
-- 先更新 Design/设备切换与服务器接入.md；设备接口同步 plugins/link/openapi.json。MCP delegation 未改变，不向 Agent 新增切换设备/SSH 凭据能力。
+- 设备接口同步 plugins/link/openapi.json。MCP delegation 未改变，不向 Agent 新增切换设备/SSH 凭据能力。
 - Link 全套 73/73；Commander 侧栏、移动布局、模型选择、更新定向回归 58/58；新增代理重复切换/长流回归 4/4。
 - 隔离真实 Harness：设备中心启动、电脑配对批准、完整代理工作台与 owner API 阻断、会话/模型/审批链路通过。
 - 隔离服务器安装器：真实 Host、现有实例复用、SSH 引导授权、升级激活与端口/TLS保持通过；服务载体为 fake systemd，不能代表真实首次联网安装或系统部署。
@@ -273,7 +273,7 @@ node --test plugins/commander/test/commands.test.mjs plugins/commander/test/runt
 
 ## 2026-10-19 Codex 开箱即用安装
 
-- 更新 Design/Harness工具安装管理.md 与工具管理 OpenAPI；Codex 等 npm 工具缺失或不兼容的 Node.js/npm 自动准备到用户级托管目录，默认国内加速、可选官方直连，不修改系统 PATH、已有工具和用户 npm 配置。MCP 安装权限未扩大。
+- Codex 等 npm 工具缺失或不兼容的 Node.js/npm 自动准备到用户级托管目录，默认国内加速、可选官方直连，不修改系统 PATH、已有工具和用户 npm 配置。MCP 安装权限未扩大。
 - 覆盖固定 Node.js 22.22.1 六平台 SHA256、Electron 排除、独立 Node/npm 环境、下载大小/超时、并发共享、取消清理、Windows 无 shell 参数传递及重启复用。会话启动和登录检测传递托管 PATH；版本文本排除前置警告。
 - Node 环境、安装生命周期、工具设置交互、owner 接口、登录、Codex 协议与会话路由合计 70/70 定向测试通过。
 - Linux x64 真实联网隔离测试：空 PATH、禁用宿主 Node 复用，从国内镜像下载并校验 Node.js，再安装 Codex；安装及重新创建安装器后均能执行 codex-cli 0.163.0。临时安装环境已删除。CLI 在 /tmp 下提示不创建辅助别名，版本与启动验证正常；不将该警告当失败。

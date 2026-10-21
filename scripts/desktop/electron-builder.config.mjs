@@ -1,8 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { copyFile, access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { createElectronBuilderConfig } from '../../deepseek-harness/apps/desktop/scripts/electron-builder-config.mjs';
 import { prepareDesktopBrand } from './prepare-brand.mjs';
+import { verifyTrayBundle } from './prepare-tray.mjs';
+import { verifyStartupBundle } from './prepare-startup.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const version = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url))).version;
@@ -36,7 +39,10 @@ config.nsis.installerSidebar = config.nsis.uninstallerSidebar = `${brandOutput}/
 config.extraResources = config.extraResources.map(resource => resource.to === 'icon.png'
   ? { from: `${root}/assets/brand/dsh-plus-logo.png`, to: 'icon.png' }
   : resource.to === 'tray.ico' ? { from: `${brandOutput}/dsh-plus.ico`, to: 'tray.ico' } : resource);
-// Electron-builder resource mapping keeps the official main process and preload intact.
+// Root-owned compile output adds startup presentation and tray copy; upstream files remain intact.
+config.files = config.files.map(file => file === 'lib/main.js'
+  ? { from: `${root}/.local/desktop/main/main.js`, to: 'lib/main.js' } : file);
+if (config.files.filter(file => typeof file === 'object' && file.to === 'lib/main.js').length !== 1) throw new Error('Official desktop main file mapping changed; review tray packaging');
 config.files.push('!renderer/welcome.html',
   { from: `${root}/scripts/desktop/renderer`, to: 'renderer', filter: ['**/*'] },
   { from: `${root}/assets/brand/dsh-plus-logo.png`, to: 'renderer/assets/dsh-plus-logo.png' });
@@ -53,6 +59,11 @@ config.extraResources.push({ from: `${pluginSeed}/node_modules`, to: 'dsh-plus/s
 const officialAfterPack = config.afterPack;
 config.afterPack = async context => {
   await officialAfterPack?.(context);
+  const require = createRequire(new URL('../../deepseek-harness/apps/desktop/package.json', import.meta.url));
+  const { extractFile } = createRequire(require.resolve('app-builder-lib'))('@electron/asar');
+  verifyTrayBundle(extractFile(`${context.appOutDir}/resources/app.asar`, 'lib/main.js').toString('utf8'));
+  verifyStartupBundle(extractFile(`${context.appOutDir}/resources/app.asar`, 'lib/main.js').toString('utf8'));
+  extractFile(`${context.appOutDir}/resources/app.asar`, 'renderer/splash.html');
   const seed = `${context.appOutDir}/resources/dsh-plus/seed`;
   for (const file of ['release.json', 'node_modules/dsh-plus/package.json', 'node_modules/dsh-plus/src/plugin.mjs', 'node_modules/dsh-plus/lib/client.js', 'node_modules/dsh-plus/lib/link.mjs', 'node_modules/dsh-plus/lib/link-web/index.html', 'node_modules/dsh-plus/voice/src/plugin.mjs']) {
     await access(`${seed}/${file}`);

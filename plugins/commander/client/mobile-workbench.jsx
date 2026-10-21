@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { DeviceLauncher } from '../../link/client/device-launcher.jsx';
 import { UIIcon } from './iconsax.jsx';
 import css from './mobile-workbench.css';
 import { trackFrameResize } from './resize-settling.mjs';
@@ -11,6 +13,8 @@ export function MobileWorkbench({ ctx }) {
   const chrome = useRef(null), opener = useRef(null);
   const [mobile, setMobile] = useState(() => window.matchMedia(MOBILE).matches);
   const [open, setOpen] = useState(false);
+  const [overlay, setOverlay] = useState(null);
+  const [leading, setLeading] = useState(null);
   useEffect(() => {
     const query = window.matchMedia(MOBILE);
     const update = () => setMobile(query.matches);
@@ -20,6 +24,21 @@ export function MobileWorkbench({ ctx }) {
   useEffect(() => {
     const frame = chrome.current?.closest('.cmd-shell-frame');
     if (!frame) return;
+    const update = () => setLeading(frame.querySelector('[data-cmd-mobile-leading]'));
+    const observer = new MutationObserver(records => {
+      // Streaming tokens do not change navigation. Only inspect the frame
+      // when a mounted/unmounted branch contains the header slot.
+      if (records.some(record => [...record.addedNodes, ...record.removedNodes].some(node =>
+        node.nodeType === 1 && (node.matches('[data-cmd-mobile-leading]') || node.querySelector('[data-cmd-mobile-leading]'))))) update();
+    });
+    observer.observe(frame, { subtree: true, childList: true });
+    update();
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    const frame = chrome.current?.closest('.cmd-shell-frame');
+    if (!frame) return;
+    setOverlay(frame.querySelector('[data-shell-overlay]'));
     const update = () => setOpen(!frame.hasAttribute('data-sidebar-collapsed'));
     const observer = new MutationObserver(update);
     observer.observe(frame, { attributes: true, attributeFilter: ['data-sidebar-collapsed'] });
@@ -61,15 +80,24 @@ export function MobileWorkbench({ ctx }) {
     const drawer = frame?.querySelector('.cmd-shell-sidebar')?.parentElement;
     if (!frame || !drawer) return;
     const main = frame.querySelector('[class*="centerCol"]'), rightbar = frame.querySelector('[data-rightbar-col]');
-    const blocked = [main, rightbar].filter(Boolean).map(node => [node, node.inert]);
+    // Keep the resident toggle reachable; inert centerCol would disable it.
+    const background = [rightbar].filter(Boolean);
+    let branch = opener.current?.closest('.cmd-mobile-navigation');
+    if (main && !main.contains(branch)) background.push(main);
+    while (branch && branch !== main && main?.contains(branch)) {
+      const parent = branch.parentElement;
+      background.push(...[...parent.children].filter(node => node !== branch));
+      branch = parent;
+    }
+    const blocked = background.map(node => [node, node.inert]);
     for (const [node] of blocked) node.inert = true;
     const attributes = ['role', 'aria-modal', 'aria-label'].map(name => [name, drawer.getAttribute(name)]);
     drawer.setAttribute('role', 'dialog');
     drawer.setAttribute('aria-modal', 'true');
     drawer.setAttribute('aria-label', '工作台导航');
     const close = () => { if (!frame.hasAttribute('data-sidebar-collapsed')) ctx.layout.toggleSidebar(); };
-    const controls = () => [...drawer.querySelectorAll(FOCUSABLE)].filter(node => !node.closest('[inert]') && node.getClientRects().length);
-    controls()[0]?.focus({ preventScroll: true });
+    const controls = () => [opener.current, ...drawer.querySelectorAll(FOCUSABLE)].filter(node => node && !node.closest('[inert]') && node.getClientRects().length);
+    (controls()[1] ?? controls()[0])?.focus({ preventScroll: true });
     const onKey = event => {
       // Official settings/menus own focus and Escape when portalled above us.
       if ([...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].some(node => node !== drawer && node.getClientRects().length)) return;
@@ -77,8 +105,8 @@ export function MobileWorkbench({ ctx }) {
       if (event.key !== 'Tab') return;
       const nodes = controls(), first = nodes[0], last = nodes.at(-1);
       if (!first) { event.preventDefault(); return; }
-      if (event.shiftKey && (document.activeElement === first || !drawer.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && (document.activeElement === last || !drawer.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
+      if (event.shiftKey && (document.activeElement === first || !nodes.includes(document.activeElement))) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && (document.activeElement === last || !nodes.includes(document.activeElement))) { event.preventDefault(); first.focus(); }
     };
     let closeFrame;
     const closeAfterNavigation = () => {
@@ -96,21 +124,21 @@ export function MobileWorkbench({ ctx }) {
     drawer.addEventListener('click', onNavigate);
     return () => {
       if (closeFrame !== undefined) cancelAnimationFrame(closeFrame);
-      const restoreFocus = drawer.contains(document.activeElement);
+      const restoreFocus = drawer.contains(document.activeElement) || document.activeElement === document.body;
       document.removeEventListener('keydown', onKey, true);
       drawer.removeEventListener('click', onNavigate);
       for (const [node, inert] of blocked) node.inert = inert;
       for (const [name, value] of attributes) { if (value === null) drawer.removeAttribute(name); else drawer.setAttribute(name, value); }
       if (restoreFocus) opener.current?.focus({ preventScroll: true });
     };
-  }, [ctx, mobile, open]);
+  }, [ctx, mobile, open, leading]);
+  const navigation = mobile && <div className={'cmd-mobile-navigation' + (leading ? '' : ' cmd-mobile-navigation-fallback')}>
+    <button ref={opener} type="button" aria-label={open ? '收起侧边栏' : '打开侧边栏'} aria-expanded={open} aria-haspopup="dialog" onClick={() => ctx.layout.toggleSidebar()}><UIIcon name="collapse" className={!open ? 'cmd-mobile-sidebar-icon-open' : ''} size={21} /></button>
+    <div className="cmd-mobile-device" inert={open ? '' : undefined}><DeviceLauncher compact /></div>
+  </div>;
   return <div ref={chrome} className="cmd-mobile-workbench" hidden={!mobile}>
-    <header className="cmd-mobile-toolbar">
-      <button ref={opener} type="button" aria-label={open ? '收起侧边栏' : '打开侧边栏'} aria-expanded={open} aria-haspopup="dialog" onClick={() => ctx.layout.toggleSidebar()}><UIIcon name="collapse" className={!open ? 'cmd-mobile-sidebar-icon-open' : ''} size={21} /></button>
-      <span>工作台</span>
-      <button type="button" aria-label="新建对话" onClick={() => { ctx.uiWorkspace.startSession(); }}><UIIcon name="edit" size={21} /></button>
-    </header>
-    {mobile && open && <button type="button" className="cmd-mobile-drawer-mask" aria-label="关闭侧边栏" tabIndex={-1} onClick={() => ctx.layout.toggleSidebar()} />}
+    {leading ? createPortal(navigation, leading) : navigation}
+    {mobile && open && overlay && createPortal(<button type="button" className="cmd-mobile-drawer-mask" aria-label="关闭侧边栏" tabIndex={-1} onClick={() => ctx.layout.toggleSidebar()} />, overlay)}
   </div>;
 }
 
@@ -119,6 +147,9 @@ export function applyMobileWorkbench(ctx) {
   style.dataset.commanderMobileWorkbench = '';
   style.textContent = css; document.head.append(style);
   ctx.effect(() => () => style.remove());
+  ctx.slots.inject('conversation.header.leading', () => ctx.slots.register({
+    name: 'conversation.header.leading', id: 'commander-mobile-navigation', priority: -10,
+  }, () => <div data-cmd-mobile-leading="" />));
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay', id: 'commander-mobile-workbench', order: -100, inject: () => ({ ctx }),
   }, MobileWorkbench));

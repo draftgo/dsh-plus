@@ -46,12 +46,12 @@ export async function openStore(directory) {
       const code = secret(), expiresAt = Date.now() + 300_000;
       pairings.set(hash(code), { expiresAt }); return { code, expiresAt };
     },
-    request(code, name) {
+    request(code, name, deviceType = 'unknown') {
       prune(); const key = hash(text(code, '配对码', 128)); const value = pairings.get(key);
       if (!value) throw new Error('配对码已使用或过期');
       pairings.delete(key);
       const pollToken = secret(), id = randomUUID();
-      pending.set(id, { id, name: text(name, '设备名称', 100), createdAt: Date.now(), expiresAt: value.expiresAt, pollHash: hash(pollToken), status: 'pending' });
+      pending.set(id, { id, name: text(name, '设备名称', 100), deviceType: ['mobile', 'computer', 'tablet'].includes(deviceType) ? deviceType : 'unknown', createdAt: Date.now(), expiresAt: value.expiresAt, pollHash: hash(pollToken), status: 'pending' });
       return { requestId: id, pollToken, expiresAt: value.expiresAt };
     },
     poll(id, pollToken) {
@@ -65,7 +65,7 @@ export async function openStore(directory) {
       if (!allow) { p.status = 'rejected'; return; }
       if (state.devices.length >= 32) throw new Error('最多配对 32 台设备，请先撤销不用的设备');
       p.status = 'approving';
-      const token = secret(), device = { id: randomUUID(), name: p.name, tokenHash: hash(token), pairedAt: Date.now(), lastSeenAt: Date.now() };
+      const token = secret(), device = { id: randomUUID(), name: p.name, deviceType: p.deviceType, tokenHash: hash(token), pairedAt: Date.now(), lastSeenAt: Date.now() };
       state.devices.push(device);
       try { await persist(); } catch (e) { state.devices = state.devices.filter(d => d !== device); p.status = 'pending'; throw e; }
       p.token = token; p.deviceId = device.id; p.status = 'approved';

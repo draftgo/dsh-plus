@@ -6,6 +6,8 @@ import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { request as tlsRequest } from 'node:https';
 import { connect as connectHttp2 } from 'node:http2';
+import { once } from 'node:events';
+import { WebSocket } from 'ws';
 import { openStore } from '../src/pairing/store.mjs';
 import { loadIdentity } from '../src/transport/tls.mjs';
 import { createWorkbench } from '../src/transport/workbench.mjs';
@@ -29,8 +31,10 @@ async function setup(t) {
   await writeFile(join(directory, 'private.txt'), 'secret');
   await symlink(join(directory, 'private.txt'), join(root, 'escape.txt'));
   const store = await openStore(join(directory, 'state')), identity = await loadIdentity(directory);
-  const calls = [], opened = [], disposed = [];
+  const calls = [], opened = [], disposed = [], voiceSockets = [];
   const ctx = {
+    get(name) { return name === 'voice' ? this.voice : undefined; },
+    voice: { acceptRealtimeSocket(ws) { voiceSockets.push(ws); ws.on('message', (data, binary) => ws.send(data, { binary })); } },
     connection: {
       createPeer(options) { return { principal: options.principal, id: 'peer-' + (calls.length + 1), async dispose() { disposed.push(this.id); } }; },
       createSharedFetchHandler(channel) { assert.equal(channel, '/api'); return { requestBodyMode() { return 'buffered'; }, async fetch(request, peer) { calls.push({ path: new URL(request.url).pathname, body: request.method === 'POST' ? await request.json() : null, peer, cookie: request.headers.get('cookie'), auth: request.headers.get('authorization') }); return Response.json({ ok: true, preset: 'same-host', voice: 'same-config' }); } }; },
@@ -42,7 +46,7 @@ async function setup(t) {
   const workbench = createWorkbench(ctx, store, { workbenchRoot: root, webRoot: pathToFileURL(web + '/') });
   const config = validateConfig({ enabled: true, host: '127.0.0.1', port: 0 }, store.state);
   const server = await listen({ identity, config, webRoot: pathToFileURL(web + '/'), store, workbench, dispatch() {}, onError() {} });
-  const f = { store, identity, workbench, server, calls, opened, disposed };
+  const f = { store, identity, workbench, server, calls, opened, disposed, ctx, voiceSockets };
   f.call = (path, options) => request(f, path, options);
   const pair = store.begin(), pending = store.request(pair.code, 'Workbench test');
   await store.decide(pending.requestId, true);
@@ -102,6 +106,45 @@ async function login(f) {
   for (const flag of ['HttpOnly', 'Secure', 'SameSite=Strict', 'Path=/link/workbench/']) assert(header.includes(flag));
   return header.split(';')[0];
 }
+function voiceSocket(f, cookie, options = {}) {
+  return new WebSocket(`wss://127.0.0.1:${f.server.port}/link/workbench/api/voice/realtime`, { ca: f.identity.cert, servername: 'localhost', origin: `https://127.0.0.1:${f.server.port}`, headers: cookie ? { cookie } : {}, ...options });
+}
+
+test('realtime voice requires device cookie, authorized Host and same Origin before accepting', async t => {
+  const f = await setup(t), cookie = await login(f);
+  for (const [credentials, options, status] of [
+    [undefined, {}, 401],
+    ['dsh_link_workbench=forged', {}, 401],
+    [cookie, { origin: 'https://evil.example' }, 403],
+    [cookie, { origin: undefined }, 403],
+    [cookie, { headers: { cookie, host: 'evil.example' } }, 403],
+  ]) {
+    const ws = voiceSocket(f, credentials, options);
+    await assert.rejects(once(ws, 'open'), new RegExp('Unexpected server response: ' + status));
+  }
+  assert.equal(f.voiceSockets.length, 0);
+  f.ctx.voice = undefined;
+  await assert.rejects(once(voiceSocket(f, cookie), 'open'), /Unexpected server response: 503/);
+});
+
+test('realtime voice preserves text and binary and terminates on device revoke and workbench close', async t => {
+  const f = await setup(t), cookie = await login(f), ws = voiceSocket(f, cookie);
+  t.after(() => ws.terminate());
+  await once(ws, 'open');
+  assert.equal(f.voiceSockets.length, 1);
+  for (const [payload, binary] of [[JSON.stringify({ type: 'attach', id: 'asr-session', ticket: 'one-use', callId: 'call-1' }), false], [Buffer.from([0, 255, 32, 0]), true]]) {
+    const result = once(ws, 'message'); ws.send(payload, { binary });
+    const [data, isBinary] = await result;
+    assert.deepEqual(data, Buffer.from(payload)); assert.equal(isBinary, binary);
+  }
+  const revoked = once(ws, 'close');
+  await f.store.revoke(f.deviceId); await f.workbench.revoke(f.deviceId); await revoked;
+  await assert.rejects(once(voiceSocket(f, cookie), 'open'), /Unexpected server response: 401/);
+  const pair = f.store.begin(), pending = f.store.request(pair.code, 'Second device');
+  await f.store.decide(pending.requestId, true); f.token = f.store.poll(pending.requestId, pending.pollToken).token;
+  const second = voiceSocket(f, await login(f)); t.after(() => second.terminate()); await once(second, 'open');
+  const ended = once(second, 'close'); await f.workbench.close(); await ended;
+});
 
 test('workbench requires approved device cookie, serves shared index and blocks owner device management', async t => {
   const f = await setup(t);
