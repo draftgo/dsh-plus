@@ -133,7 +133,7 @@ export async function mountLink(ctx, config = {}) {
       try {
         if (closed) throw new Error('Link 已关闭');
         const input = await request.json();
-        if (input.action !== 'launch') throw new Error('不支持的设备操作');
+        if (!['launch', 'devices'].includes(input.action)) throw new Error('不支持的设备操作');
         const requestedParent = input.parentOrigin;
         // The official HTTP bridge uses dsh.internal in request.url; browser
         // Origin and the carrier Host retain the actual admitted page address.
@@ -152,7 +152,7 @@ export async function mountLink(ctx, config = {}) {
         deviceCenter ??= createDeviceCenter({ directory: join(directory, 'outgoing'), webRoot, hostAdmin: admin }).catch(error => { deviceCenter = undefined; throw error; });
         const center = await deviceCenter;
         if (closed) throw new Error('Link 已关闭');
-        return Response.json(center.launch(parent), { headers: { 'cache-control': 'no-store' } });
+        return Response.json(input.action === 'devices' ? center.summary() : center.launch(parent), { headers: { 'cache-control': 'no-store' } });
       } catch (error) { return Response.json({ error: error.message }, { status: 400, headers: { 'cache-control': 'no-store' } }); }
     },
   }));

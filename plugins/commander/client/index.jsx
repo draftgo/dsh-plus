@@ -20,6 +20,7 @@ import { startSidebarPolling } from './sidebar-refresh.mjs';
 import { UpdateLauncher, mountUpdatesStyle } from './updates.jsx';
 import { mountBrand } from '../../link/client/brand.jsx';
 import { DeviceLauncher } from '../../link/client/device-launcher.jsx';
+import { DeviceSwitch } from '../../link/client/device-switch.jsx';
 
 const names = { codex: 'Codex', claude: 'Claude Code', pi: 'Pi', opencode: 'OpenCode', gemini: 'Gemini CLI', hermes: 'Hermes', grok: 'Grok Build', mcode: 'MiniMax Code', deepseek: 'DeepSeek' };
 const liveStates = new Set(['running', 'connecting', 'waiting']);
@@ -217,6 +218,7 @@ function Projects({ host, open, newSession, expandSidebar, wide = true }) {
   };
   return <section className={`cmd-projects ${wide ? '' : 'cmd-narrow'}`} aria-label="项目与对话">
     <nav className="cmd-sidebar-nav" aria-label="快捷工具栏">
+      <DeviceSwitch />
       <DeviceLauncher />
       <Tooltip label="新聊天" delayMs={450} portal><button type="button" className="cmd-new-chat" onClick={() => newSession()} aria-label="创建新聊天"><UIIcon name="edit" size={16} /></button></Tooltip>
       <Tooltip label="搜索对话" delayMs={450} portal><button type="button" className="cmd-search-toggle" onClick={() => { if (!wide) expandSidebar?.(); if (wide && searching) setFilter(''); setSearching(!wide || !searching); }} aria-label="搜索对话" aria-expanded={searching} aria-pressed={searching}><UIIcon name="search" size={16} /></button></Tooltip>

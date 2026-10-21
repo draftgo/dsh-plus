@@ -51,9 +51,13 @@ test('device launch supports local and Desktop owners but reports the cloud carr
       const api = action => fetch(centerUrl.origin + base.pathname + 'api/devices', { method: 'POST', headers: { origin: centerUrl.origin, 'content-type': 'application/json' }, body: JSON.stringify({ action }) });
       assert.equal((await (await api('list')).json()).capabilities.hostAdmin, true);
       assert.equal((await (await api('hostStatus')).json()).enabled, false);
-
     }
   }
+  const summary = await route.fetch(new Request('http://127.0.0.1:8080' + route.path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'devices' }) }));
+  assert.equal(summary.status, 200);
+  assert.deepEqual((await summary.json()).devices, [{ id: 'local', name: '本机', kind: 'local', status: 'online' }]);
+  const cloudSummary = await route.fetch(new Request('https://cloud.example' + route.path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'devices' }) }));
+  assert.equal(cloudSummary.status, 409);
 });
 
 test('plugin admin persists settings, advertises real TLS and separates public pairing trust', async t => {

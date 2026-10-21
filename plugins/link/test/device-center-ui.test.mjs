@@ -151,6 +151,8 @@ test('connection management and saved devices occupy separate segment panels', a
   const current = view.nodes().find(node => node.props.className === 'dc-current-device');
   const remote = view.nodes().find(node => node.props.className === 'dc-other-devices');
   assert.match(textOf(current), /本机/);
+  assert.match(textOf(current), /本机工作台/);
+  assert.doesNotMatch(textOf(current), /当前工作台|此刻所在/);
   assert.doesNotMatch(textOf(remote), /本机/);
   assert.match(textOf(remote), /开发电脑/);
   assert.equal(panel('devices').props.hidden, false);

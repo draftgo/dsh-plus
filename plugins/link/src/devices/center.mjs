@@ -140,6 +140,8 @@ export async function createDeviceCenter({ directory, webRoot, managerFactory = 
   return {
     origin, api,
     launch(parentOrigin) { for (const [key, value] of tickets) if (value.expires < Date.now()) tickets.delete(key); const ticket = secret(); tickets.set(ticket, { expires: Date.now() + 60000, parentOrigin }); return { url: (publicOrigin || origin) + (publicOrigin ? '/devices' : '') + '/enter?ticket=' + ticket }; },
+    /** Saved names for the host caption. No tokens, routes or management actions. */
+    summary() { return { devices: registry.list().devices.map(({ id, name, kind, status }) => ({ id, name, kind, status })) }; },
     async close() { closed = true; tickets.clear(); sessions.clear(); await Promise.all([...proxies.values()].map(proxy => proxy.close())); await manager?.close(); await registry.flush(); const done = new Promise(resolve => server.close(resolve)); sockets.forEach(socket => socket.destroy()); await done; },
   };
 }
