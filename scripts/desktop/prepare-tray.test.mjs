@@ -75,10 +75,16 @@ test('the actual main bundle preserves show, quit, relabel and disposal through 
   assert.throws(() => verifyTrayBundle(code.replace('label: id === "zh-CN" ? "主窗口" : "Main Window"', 'label: messages.openApplication')), /missing localized/);
 });
 
-test('formal Windows packaging compiles and maps the staged main after the official build', async () => {
+test('formal Windows packaging stages the compiled main inside the app dir only while files are collected', async () => {
   const source = await readFile(new URL('./package-windows.mjs', import.meta.url), 'utf8');
   assert.ok(source.indexOf("await pm(['run', 'build:official'])") < source.indexOf("await run([join(root, 'scripts/desktop/prepare-tray.mjs')]"));
-  assert.equal(config.files.includes('lib/main.js'), false);
-  assert.equal(config.files.filter(file => typeof file === 'object' && file.to === 'lib/main.js').length, 1);
-  assert.equal(resolve(config.files.find(file => typeof file === 'object' && file.to === 'lib/main.js').from), join(root, '.local/desktop/main/main.js'));
+  assert.ok(source.indexOf('prepare-tray.mjs') < source.indexOf("await pm(['exec', 'electron-builder'"));
+  assert.equal(config.files.includes('lib/main.js'), true);
+  assert.equal(config.files.some(file => typeof file === 'object' && file.to === 'lib/main.js'), false);
+  assert.equal(typeof config.beforePack, 'function');
+  assert.equal(typeof config.afterAllArtifactBuild, 'function');
+  const configSource = await readFile(new URL('./electron-builder.config.mjs', import.meta.url), 'utf8');
+  assert.ok(configSource.indexOf('await copyFile(stagedMain, desktopMain)') < configSource.indexOf('config.afterAllArtifactBuild'));
+  assert.match(configSource, /afterAllArtifactBuild[\s\S]*writeFile\(desktopMain, officialMainBytes\)/);
+  assert.match(configSource, /process\.once\('exit'/);
 });

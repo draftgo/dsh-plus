@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { copyFile, access } from 'node:fs/promises';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { copyFile, access, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { createElectronBuilderConfig } from '../../deepseek-harness/apps/desktop/scripts/electron-builder-config.mjs';
@@ -39,10 +39,38 @@ config.nsis.installerSidebar = config.nsis.uninstallerSidebar = `${brandOutput}/
 config.extraResources = config.extraResources.map(resource => resource.to === 'icon.png'
   ? { from: `${root}/assets/brand/dsh-plus-logo.png`, to: 'icon.png' }
   : resource.to === 'tray.ico' ? { from: `${brandOutput}/dsh-plus.ico`, to: 'tray.ico' } : resource);
-// Root-owned compile output adds startup presentation and tray copy; upstream files remain intact.
-config.files = config.files.map(file => file === 'lib/main.js'
-  ? { from: `${root}/.local/desktop/main/main.js`, to: 'lib/main.js' } : file);
-if (config.files.filter(file => typeof file === 'object' && file.to === 'lib/main.js').length !== 1) throw new Error('Official desktop main file mapping changed; review tray packaging');
+// electron-builder drops file mappings whose source is outside the desktop app dir.
+// Swap the compiled entry in only while app files are collected, then restore the official build.
+if (!config.files.includes('lib/main.js')) throw new Error('Official desktop main file mapping changed; review tray packaging');
+const desktopMain = `${root}/deepseek-harness/apps/desktop/lib/main.js`;
+const stagedMain = `${root}/.local/desktop/main/main.js`;
+let officialMainBytes;
+const officialBeforePack = config.beforePack;
+config.beforePack = async context => {
+  officialMainBytes = await readFile(desktopMain);
+  await copyFile(stagedMain, desktopMain);
+  try {
+    await officialBeforePack?.(context);
+  } catch (error) {
+    await writeFile(desktopMain, officialMainBytes);
+    officialMainBytes = undefined;
+    throw error;
+  }
+};
+const officialAfterPack = config.afterPack;
+const officialAfterAll = config.afterAllArtifactBuild;
+config.afterAllArtifactBuild = async context => {
+  try {
+    return await officialAfterAll?.(context);
+  } finally {
+    if (officialMainBytes) await writeFile(desktopMain, officialMainBytes);
+    officialMainBytes = undefined;
+  }
+};
+process.once('exit', () => {
+  if (!officialMainBytes) return;
+  writeFileSync(desktopMain, officialMainBytes);
+});
 config.files.push('!renderer/welcome.html',
   { from: `${root}/scripts/desktop/renderer`, to: 'renderer', filter: ['**/*'] },
   { from: `${root}/assets/brand/dsh-plus-logo.png`, to: 'renderer/assets/dsh-plus-logo.png' });
@@ -56,7 +84,6 @@ config.extraResources.push({ from: pluginSeed, to: 'dsh-plus/seed', filter: ['**
 // Like the official runtime mapping, the seed needs an explicit node_modules
 // source: electron-builder excludes a source directory's root node_modules.
 config.extraResources.push({ from: `${pluginSeed}/node_modules`, to: 'dsh-plus/seed/node_modules', filter: ['**/*'] });
-const officialAfterPack = config.afterPack;
 config.afterPack = async context => {
   await officialAfterPack?.(context);
   const require = createRequire(new URL('../../deepseek-harness/apps/desktop/package.json', import.meta.url));
