@@ -29,9 +29,11 @@ export function startupWindowPlugin(mainPath) {
 }
 
 export function verifyStartupBundle(source) {
-  if (!source.includes('splash.html') || !source.includes("join(process.resourcesPath, 'icon.png')")
-    || !/closeXiaojiaoStartup\s*=\s*await openStartupWindow\(/.test(source)
-    || !/function reportFatal\(error, source\)\s*\{\s*closeXiaojiaoStartup\?\.\(\)/.test(source)) {
-    throw new Error('Compiled desktop is missing the startup window lifecycle');
-  }
+  const missing = [];
+  if (!source.includes('splash.html')) missing.push('splash page');
+  // Bundling rewrites join() and quotes, so match the surviving resource path pieces.
+  if (!source.includes('resourcesPath') || !source.includes('icon.png')) missing.push('window icon');
+  if (!/closeXiaojiaoStartup\s*=\s*await openStartupWindow\(/.test(source)) missing.push('startup open');
+  if (!/function reportFatal\(error, source\)\s*\{\s*closeXiaojiaoStartup\?\.\(\)/.test(source)) missing.push('fatal cleanup');
+  if (missing.length) throw new Error(`Compiled desktop is missing the startup window lifecycle: ${missing.join(', ')}`);
 }
