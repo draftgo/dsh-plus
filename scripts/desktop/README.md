@@ -12,7 +12,7 @@
 - `prepare-tray.mjs`：官方完整构建后复用官方 tsdown 主进程配置，仅在编译输入中将 Windows 托盘菜单改为“主窗口”“退出”（英文 Main Window / Quit），并接入启动卡片。编译结果写到 `.local/desktop/main/`。electron-builder 会丢弃应用目录外的 from/to 映射，因此只在收集 asar 文件时临时换入 `apps/desktop/lib/main.js`，收集后立即恢复官方产物。不修改子模块源码，不运行时拦截。官方模块、配置或文案锚点变化立即中止打包。
 - `renderer/`：打包时通过官方文件映射替换初始化页面，只展示小角和工作台准备状态，通过已有 `dshWelcome.skip()` 进入工作台；失败可重试，不写入虚假凭据或登录状态。模型凭据在工作台内配置。
 - `prepare-startup.mjs` / `startup-window.mjs`：复用根目录主进程编译步骤，在官方 `main()` 开始时加载 420×300 小角启动卡片，覆盖后端初始化等待；其他窗口显示、致命错误或退出时销毁。窗口图标使用 `resources/icon.png`，避免任务栏落到 Electron 默认图标。编译锚点变化中止打包，不修改上游源码、不做运行时拦截。仅正式 Plus Windows 打包入口接入，普通官方 dev/start 不变。
-- `renderer/splash.html`：本地 Logo、墨黑描边与冷青 loading，不显示虚假百分比，不设最低停留时长；20 秒后提示仍在准备，支持减少动效。卡片只能在 Electron ready 后显示，无法覆盖操作系统加载 exe 的阶段，也不缩短实际初始化时间。
+- `renderer/splash.html`：内联小角 SVG（左图标、右文案）、墨黑描边与冷青 loading，不依赖 asar 外部 PNG；不显示虚假百分比，不设最低停留时长；20 秒后提示仍在准备，支持减少动效。卡片只能在 Electron ready 后显示，无法覆盖操作系统加载 exe 的阶段，也不缩短实际初始化时间。
 
 启动卡片验证：`node --test scripts/desktop/startup-window.test.mjs scripts/desktop/startup.test.mjs` 覆盖窗口显示/销毁、失败回退、编译锚点和页面重试；主进程编译与打包映射复用 `prepare-tray.test.mjs`。2026-10-20 已通过定向测试和实际主进程编译（当前 Node 22 使用仓库 tsx loader）；未生成新 Windows EXE、未实跑 Windows GUI。
 - `smoke-windows.mjs`：验证打包资源、官方 Host 启动、离线配对 profile 初始化与认证 Link 管理接口。

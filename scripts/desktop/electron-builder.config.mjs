@@ -72,8 +72,7 @@ process.once('exit', () => {
   writeFileSync(desktopMain, officialMainBytes);
 });
 config.files.push('!renderer/welcome.html',
-  { from: `${root}/scripts/desktop/renderer`, to: 'renderer', filter: ['**/*'] },
-  { from: `${root}/assets/brand/dsh-plus-logo.png`, to: 'renderer/assets/dsh-plus-logo.png' });
+  { from: `${root}/scripts/desktop/renderer`, to: 'renderer', filter: ['**/*'] });
 // A physical runtime also lets installation initialize a profile entirely offline.
 config.asarUnpack.push('**/dsh/**/*');
 config.extraResources.push({ from: `${root}/scripts/desktop/plugin-bundle.mjs`, to: 'dsh-plus/plugin-bundle.mjs' });

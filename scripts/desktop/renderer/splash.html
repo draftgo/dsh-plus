@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src data:; base-uri 'none'; form-action 'none'">
     <title>小角</title>
     <link rel="stylesheet" href="dsh-plus-startup.css">
     <script src="splash.js" defer></script>
@@ -12,11 +12,21 @@
     <div class="drag-region" aria-hidden="true"></div>
     <main>
       <div class="startup-brand">
-        <img class="startup-mascot" src="assets/dsh-plus-logo.png" alt="小角" width="64" height="64">
-        <h1>小角</h1>
+        <svg class="startup-mascot" viewBox="0 0 1024 1024" role="img" aria-label="小角" width="64" height="64">
+          <rect width="1024" height="1024" rx="232" fill="#222222"/>
+          <g transform="translate(167,282) scale(1.15)">
+            <rect width="600" height="400" rx="100" fill="#F3EBDF"/>
+            <path d="M 400 400 L 500 400 A 100 100 0 0 0 600 300 L 600 200 Z" fill="#D44A36"/>
+            <rect x="89" y="141" width="78" height="118" rx="39" fill="#222222"/>
+            <rect x="227" y="141" width="78" height="118" rx="39" fill="#222222"/>
+          </g>
+        </svg>
+        <div class="startup-copy">
+          <h1>小角</h1>
+          <p id="startup-status" role="status" aria-live="polite">正在启动…</p>
+        </div>
       </div>
       <div class="startup-loading" aria-hidden="true"></div>
-      <p id="startup-status" role="status" aria-live="polite">启动中…</p>
     </main>
   </body>
 </html>

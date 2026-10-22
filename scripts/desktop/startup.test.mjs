@@ -10,11 +10,14 @@ test('desktop startup keeps the app identity and local mascot beside the DeepSee
   const css = await readFile(new URL('./renderer/dsh-plus-startup.css', import.meta.url), 'utf8');
   assert.ok(html.includes('<title>小角</title>'));
   assert.ok(html.includes('<h1>小角</h1>'));
+  assert.ok(html.indexOf('class="startup-mascot"') < html.indexOf('class="startup-copy"'));
   assert.ok(html.indexOf('class="startup-mascot"') < html.indexOf('class="startup-engine"'));
-  assert.ok(html.includes('src="assets/dsh-plus-logo.png"'));
+  assert.ok(html.includes('<svg class="startup-mascot"'));
+  assert.ok(html.includes('fill="#F3EBDF"'));
+  assert.doesNotMatch(html, /<img[\s>]/);
   assert.ok(html.includes('<span class="startup-engine">DeepSeek</span>'));
   assert.doesNotMatch(html, /(?:src|href)="https?:/);
-  assert.ok(css.includes('.startup-brand { display: flex;'));
+  assert.ok(css.includes('.startup-brand { display: flex; flex-direction: row;'));
   assert.ok(css.includes('animation: startup-scan'));
   assert.ok(css.includes('@media (prefers-reduced-motion: reduce)'));
   assert.ok(css.includes('animation: none;'));
@@ -23,7 +26,10 @@ test('desktop startup keeps the app identity and local mascot beside the DeepSee
 test('native splash stays local and only updates its waiting message after 20 seconds', async () => {
   const html = await readFile(new URL('./renderer/splash.html', import.meta.url), 'utf8');
   const script = await readFile(new URL('./renderer/splash.js', import.meta.url), 'utf8');
-  assert.ok(html.includes('src="assets/dsh-plus-logo.png"'));
+  assert.ok(html.includes('<svg class="startup-mascot"'));
+  assert.ok(html.includes('fill="#F3EBDF"'));
+  assert.ok(html.indexOf('class="startup-mascot"') < html.indexOf('class="startup-copy"'));
+  assert.doesNotMatch(html, /<img[\s>]/);
   assert.ok(html.includes('href="dsh-plus-startup.css"'));
   assert.ok(html.includes('role="status" aria-live="polite"'));
   assert.doesNotMatch(html, /(?:src|href)="https?:/);
