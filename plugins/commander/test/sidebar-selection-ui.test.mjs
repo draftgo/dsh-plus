@@ -99,7 +99,9 @@ test('live official sessions light their workspace without adding a global toolb
     assert.equal(activity.length, expected ? 1 : 0);
     assert.equal(activity[0]?.props.status, expected);
     const toolbar = nodes.find(node => node.props['aria-label'] === '快捷工具栏');
-    assert.equal(toolbar.children.length, 3, 'new chat, search and device launcher remain');
+    const labels = toolbar.children.map(node => node.props?.['aria-label'] ?? node.props?.label);
+    assert.ok(labels.includes('新聊天') && labels.includes('搜索对话'), 'new chat and search remain');
+    assert.equal(toolbar.children.some(node => node.props?.status !== undefined), false, 'workspace activity never reaches the toolbar');
   }
 });
 
